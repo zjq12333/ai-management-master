@@ -1,4 +1,7 @@
-__pycache__/
+﻿__pycache__/
 *.pyc
 repair-*.log
 *.bak
+
+*.zip
+

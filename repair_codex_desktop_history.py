@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import json
 import sqlite3
 from pathlib import Path
@@ -35,7 +35,7 @@ def load_threads(db_path: Path) -> list[dict]:
             dict(row)
             for row in con.execute(
                 """
-                select id, cwd, archived, model_provider, updated_at
+                select id, cwd, archived, model_provider, updated_at, has_user_event, first_user_message, title, rollout_path
                 from threads
                 order by updated_at desc
                 """
@@ -43,6 +43,15 @@ def load_threads(db_path: Path) -> list[dict]:
         ]
     finally:
         con.close()
+
+
+def has_conversation(thread: dict) -> bool:
+    """Return True only for threads that contain an actual user conversation."""
+    return bool(thread.get("has_user_event"))
+
+
+def conversation_threads(threads: list[dict]) -> list[dict]:
+    return [thread for thread in threads if has_conversation(thread)]
 
 
 def unarchive_threads(db_path: Path) -> int:
@@ -70,12 +79,13 @@ def repair_state(
 ) -> dict:
     state = json.loads(state_path.read_text(encoding="utf-8"))
 
-    thread_ids = [thread["id"] for thread in threads]
+    importable_threads = conversation_threads(threads)
+    thread_ids = [thread["id"] for thread in importable_threads]
     hints: dict[str, str] = {}
     exact_roots: list[str] = []
     broad_roots: list[str] = []
 
-    for thread in threads:
+    for thread in importable_threads:
         cwd = clean_cwd(thread.get("cwd"))
         if not cwd:
             continue
@@ -154,16 +164,23 @@ def main() -> int:
     result = {
         "codex_home": str(codex_home),
         "threads": len(threads),
+        "conversation_threads": len(conversation_threads(threads)),
+        "empty_threads_skipped": len(threads) - len(conversation_threads(threads)),
         "providers": provider_counts,
         "archived_before": archived_count,
         "dry_run": args.dry_run,
     }
 
     if args.dry_run:
+        importable_threads = conversation_threads(threads)
         roots = sorted(
-            {clean_cwd(thread.get("cwd")) for thread in threads if thread.get("cwd")}
+            {clean_cwd(thread.get("cwd")) for thread in importable_threads if thread.get("cwd")}
+        )
+        skipped_roots = sorted(
+            {clean_cwd(thread.get("cwd")) for thread in threads if (not has_conversation(thread)) and thread.get("cwd")}
         )
         result["workspace_roots_that_would_be_written"] = len(roots)
+        result["workspace_roots_skipped_no_conversation"] = len(skipped_roots)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
@@ -182,3 +199,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+
