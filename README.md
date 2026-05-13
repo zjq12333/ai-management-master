@@ -1,4 +1,4 @@
-﻿# Codex Desktop 历史记录修复工具
+# Codex Desktop 历史记录修复工具
 
 这是一个给 **Codex Desktop 左侧历史记录不可见、会话被隐藏、工作区位置错乱** 准备的一键修复工具。
 
