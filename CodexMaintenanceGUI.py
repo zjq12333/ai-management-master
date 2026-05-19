@@ -10,7 +10,7 @@ from tkinter import BooleanVar, StringVar, Tk, filedialog, messagebox
 from tkinter import ttk
 
 
-APP_TITLE = "Codex 本地维护工具箱"
+APP_TITLE = "AI管理大师"
 
 
 class CodexMaintenanceGUI:
