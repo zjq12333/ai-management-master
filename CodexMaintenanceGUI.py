@@ -1,6 +1,7 @@
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,7 @@ class CodexMaintenanceGUI:
         self.python_exe = self.find_console_python()
         self.output_queue: queue.Queue[str] = queue.Queue()
         self.worker: threading.Thread | None = None
+        self.last_threadripper_status: dict[str, object] = {}
 
         self.codex_home_var = StringVar()
         self.status_var = StringVar(value="请选择或确认 Codex 数据目录")
@@ -136,7 +138,7 @@ class CodexMaintenanceGUI:
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
         ttk.Label(
             header,
-            text="正常不用管登录方式和提供商。工具会自动搜索所有来源的聊天；只有恢复后仍看不到聊天时，再尝试“修复隐藏聊天识别”。",
+            text="正常不用管登录方式和提供商。工具会自动搜索所有来源的聊天；恢复时也会自动检查是否需要修复隐藏聊天识别。",
             wraplength=760,
         ).grid(row=2, column=0, sticky="w", pady=(4, 0))
 
@@ -177,7 +179,7 @@ class CodexMaintenanceGUI:
         self.add_option(options, 0, 2, "允许空工作区", self.allow_empty_cwd, "会显示目录存在但为空的聊天，可能出现空项目。")
         self.add_option(options, 1, 0, "允许缺失 session", self.allow_missing_session, "会显示找不到会话文件的记录，可能无法打开完整内容。")
         self.add_option(options, 1, 1, "取消所选归档标记", self.unarchive_selected, "正式恢复时会把选中的归档聊天改成未归档。")
-        self.add_option(options, 1, 2, "修复隐藏聊天识别", self.sync_provider, "正常不用打开。只有恢复后仍看不到聊天时，再尝试修正旧聊天的识别标记。")
+        self.add_option(options, 1, 2, "强制修复隐藏聊天识别", self.sync_provider, "默认会在检测到不匹配时自动尝试。勾选后会在恢复时强制执行一次。")
         self.add_option(options, 2, 0, "允许安装 threadripper", self.install_threadripper, "会通过 npm 安装辅助工具，需要联网。")
 
         advanced_actions = ttk.Frame(options)
@@ -281,10 +283,10 @@ class CodexMaintenanceGUI:
         if not self.ensure_ready("预览"):
             return
         commands = []
-        if self.sync_provider.get() and shutil.which("codex-threadripper"):
-            commands.append(["codex-threadripper", "--codex-home", self.codex_home_var.get(), "status"])
+        if self.threadripper_command():
+            commands.append(["__THREADRIPPER_STATUS__"])
         elif self.sync_provider.get():
-            self.append_log("codex-threadripper 未安装，跳过 provider 状态检查。")
+            self.append_log("codex-threadripper 未安装，跳过隐藏聊天识别检查。")
         commands.append(self.base_repair_args(dry_run=True))
         self.run_commands(commands, "预览恢复")
 
@@ -303,18 +305,19 @@ class CodexMaintenanceGUI:
             return
 
         commands = []
-        if self.sync_provider.get():
-            if self.install_threadripper.get():
-                npm = shutil.which("npm")
-                if npm:
-                    commands.append([npm, "i", "-g", "codex-threadripper"])
-                    commands.append(["__THREADRIPPER_SYNC__"])
-                else:
-                    self.append_log("npm 未安装，跳过 threadripper 安装和 provider 同步。")
-            elif threadripper := shutil.which("codex-threadripper"):
-                commands.append([threadripper, "--codex-home", self.codex_home_var.get(), "sync"])
+        if self.threadripper_command():
+            commands.append(["__THREADRIPPER_STATUS__"])
+            commands.append(["__AUTO_THREADRIPPER_SYNC__"])
+        elif self.install_threadripper.get():
+            npm = shutil.which("npm")
+            if npm:
+                commands.append([npm, "i", "-g", "codex-threadripper"])
+                commands.append(["__THREADRIPPER_STATUS__"])
+                commands.append(["__AUTO_THREADRIPPER_SYNC__"])
             else:
-                self.append_log("codex-threadripper 未安装，跳过 provider 同步。")
+                self.append_log("npm 未安装，无法安装隐藏聊天识别修复工具。将只做基础恢复。")
+        else:
+            self.append_log("未检测到隐藏聊天识别修复工具，将只做基础恢复。")
         commands.append(self.base_repair_args(dry_run=False))
         self.run_commands(commands, "执行修复")
 
@@ -344,10 +347,20 @@ class CodexMaintenanceGUI:
     def command_worker(self, commands: list[list[str]], label: str) -> None:
         try:
             for command in commands:
-                if command == ["__THREADRIPPER_SYNC__"]:
-                    threadripper = shutil.which("codex-threadripper")
+                if command == ["__THREADRIPPER_STATUS__"]:
+                    threadripper = self.threadripper_command()
                     if not threadripper:
-                        self.output_queue.put("codex-threadripper 安装后仍未找到，跳过 provider 同步。")
+                        self.output_queue.put("未找到隐藏聊天识别修复工具，跳过状态检查。")
+                        continue
+                    command = [threadripper, "--codex-home", self.codex_home_var.get(), "status"]
+                elif command == ["__AUTO_THREADRIPPER_SYNC__"]:
+                    threadripper = self.threadripper_command()
+                    if not threadripper:
+                        self.output_queue.put("隐藏聊天识别修复工具安装后仍未找到，跳过自动修复。")
+                        continue
+                    rows = int(self.last_threadripper_status.get("rows_needing_reconcile") or 0)
+                    if rows <= 0 and not self.sync_provider.get():
+                        self.output_queue.put("隐藏聊天识别已经对齐，跳过自动修复。")
                         continue
                     command = [threadripper, "--codex-home", self.codex_home_var.get(), "sync"]
                 self.output_queue.put("> " + " ".join(command))
@@ -367,6 +380,10 @@ class CodexMaintenanceGUI:
                 if process.returncode != 0:
                     self.output_queue.put(f"{label}失败，退出码：{process.returncode}")
                     return
+                if command[-1] == "status":
+                    parsed = self.parse_threadripper_status(process.stdout)
+                    if parsed:
+                        self.output_queue.put("__THREADRIPPER_STATUS__" + json.dumps(parsed, ensure_ascii=False))
                 self.try_update_summary(process.stdout)
             self.output_queue.put(f"{label}完成。")
         except FileNotFoundError as exc:
@@ -399,6 +416,21 @@ class CodexMaintenanceGUI:
             return
         self.output_queue.put("__SUMMARY__" + json.dumps(data, ensure_ascii=False))
 
+    def threadripper_command(self) -> str | None:
+        return shutil.which("codex-threadripper")
+
+    def parse_threadripper_status(self, text: str) -> dict[str, object]:
+        parsed: dict[str, object] = {}
+        for raw in text.splitlines():
+            line = raw.strip()
+            if line.startswith("Target provider:"):
+                parsed["target_provider"] = line.split(":", 1)[1].strip()
+            elif line.startswith("Rows needing reconcile:"):
+                match = re.search(r"(\d+)$", line)
+                if match:
+                    parsed["rows_needing_reconcile"] = int(match.group(1))
+        return parsed
+
     def drain_output_queue(self) -> None:
         try:
             while True:
@@ -410,6 +442,15 @@ class CodexMaintenanceGUI:
                 elif item.startswith("__SUMMARY__"):
                     data = json.loads(item.removeprefix("__SUMMARY__"))
                     self.update_summary(data)
+                elif item.startswith("__THREADRIPPER_STATUS__"):
+                    data = json.loads(item.removeprefix("__THREADRIPPER_STATUS__"))
+                    self.last_threadripper_status = data
+                    rows = int(data.get("rows_needing_reconcile") or 0)
+                    target = data.get("target_provider") or "未知"
+                    if rows > 0:
+                        self.append_log(f"检测到隐藏聊天识别不匹配：{rows} 条需要修复，当前目标来源是 {target}。")
+                    else:
+                        self.append_log(f"隐藏聊天识别已对齐，当前目标来源是 {target}。")
                 else:
                     for line in item.splitlines():
                         self.append_log(line)
