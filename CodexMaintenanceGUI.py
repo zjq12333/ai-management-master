@@ -134,6 +134,11 @@ class CodexMaintenanceGUI:
             header,
             text="小白模式会自动使用安全规则：不恢复归档、不恢复已删除工作区、不恢复空工作区。",
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(
+            header,
+            text="正常不用管登录方式和提供商。工具会自动搜索所有来源的聊天；只有恢复后仍看不到聊天时，再尝试“修复隐藏聊天识别”。",
+            wraplength=760,
+        ).grid(row=2, column=0, sticky="w", pady=(4, 0))
 
         self.summary_frame = ttk.Frame(main)
         self.summary_frame.grid(row=2, column=0, sticky="ew", pady=(0, 10))
