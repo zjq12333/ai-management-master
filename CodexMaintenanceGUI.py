@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from datetime import datetime
 from pathlib import Path
 from tkinter import BooleanVar, StringVar, Tk, filedialog, messagebox
 from tkinter import ttk
@@ -31,6 +32,13 @@ class CodexMaintenanceGUI:
         self.codex_home_var = StringVar()
         self.status_var = StringVar(value="请选择或确认 Codex 数据目录")
         self.feature_var = StringVar(value="历史恢复")
+        self.launch_mode = StringVar(value="official")
+        self.provider_key_var = StringVar(value="cliproxy")
+        self.provider_name_var = StringVar(value="CLIProxyAPI")
+        self.provider_base_url_var = StringVar(value="http://127.0.0.1:8317/v1")
+        self.provider_wire_api_var = StringVar(value="responses")
+        self.provider_env_key_var = StringVar(value="OPENAI_API_KEY")
+        self.provider_requires_auth = BooleanVar(value=False)
 
         self.include_archived = BooleanVar(value=False)
         self.allow_missing_cwd = BooleanVar(value=False)
@@ -111,7 +119,7 @@ class CodexMaintenanceGUI:
         main = ttk.Frame(self.root, padding=(16, 14))
         main.grid(row=0, column=1, sticky="nsew")
         main.columnconfigure(0, weight=1)
-        main.rowconfigure(5, weight=1)
+        main.rowconfigure(6, weight=1)
 
         path_frame = ttk.LabelFrame(main, text="自动检测到的 Codex 数据目录", padding=10)
         path_frame.grid(row=0, column=0, sticky="ew")
@@ -153,8 +161,35 @@ class CodexMaintenanceGUI:
         self.create_summary_card(2, "已跳过", "待预览")
         self.create_summary_card(3, "Provider", "待预览")
 
+        launch_frame = ttk.LabelFrame(main, text="启动前配置", padding=10)
+        launch_frame.grid(row=3, column=0, sticky="ew", pady=(0, 10))
+        for column in range(4):
+            launch_frame.columnconfigure(column, weight=1)
+
+        ttk.Radiobutton(launch_frame, text="官方账号", variable=self.launch_mode, value="official", command=self.refresh_launch_mode).grid(row=0, column=0, sticky="w")
+        ttk.Radiobutton(launch_frame, text="API 供应商", variable=self.launch_mode, value="api", command=self.refresh_launch_mode).grid(row=0, column=1, sticky="w")
+        ttk.Label(launch_frame, text="先在这里选好通道，再由工具自动对齐聊天并启动 Codex。").grid(row=0, column=2, columnspan=2, sticky="w")
+
+        self.api_frame = ttk.Frame(launch_frame)
+        self.api_frame.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        for column in range(4):
+            self.api_frame.columnconfigure(column, weight=1)
+
+        self.add_labeled_entry(self.api_frame, 0, 0, "provider 键", self.provider_key_var)
+        self.add_labeled_entry(self.api_frame, 0, 1, "显示名称", self.provider_name_var)
+        self.add_labeled_entry(self.api_frame, 0, 2, "base_url", self.provider_base_url_var)
+        self.add_labeled_entry(self.api_frame, 0, 3, "wire_api", self.provider_wire_api_var)
+        self.add_labeled_entry(self.api_frame, 1, 0, "env_key", self.provider_env_key_var)
+        ttk.Checkbutton(self.api_frame, text="requires_openai_auth", variable=self.provider_requires_auth).grid(row=1, column=1, sticky="w", pady=(22, 0))
+
+        launch_actions = ttk.Frame(launch_frame)
+        launch_actions.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        self.launch_button = ttk.Button(launch_actions, text="配置并启动 Codex", command=self.configure_and_launch_codex)
+        self.launch_button.grid(row=0, column=0, sticky="w", ipadx=18, ipady=8)
+        ttk.Label(launch_actions, text="官方账号模式会先切回官方通道；API 模式会先写入供应商配置。").grid(row=0, column=1, sticky="w", padx=(12, 0))
+
         actions = ttk.Frame(main, padding=(0, 6))
-        actions.grid(row=3, column=0, sticky="ew")
+        actions.grid(row=4, column=0, sticky="ew")
         actions.columnconfigure(2, weight=1)
 
         self.search_button = ttk.Button(actions, text="搜索聊天记录", command=self.search_chat_history)
@@ -169,7 +204,7 @@ class CodexMaintenanceGUI:
         self.advanced_button.grid(row=0, column=3, sticky="e")
 
         self.advanced_container = ttk.LabelFrame(main, text="高级设置", padding=10)
-        self.advanced_container.grid(row=4, column=0, sticky="ew", pady=(4, 8))
+        self.advanced_container.grid(row=5, column=0, sticky="ew", pady=(4, 8))
         self.advanced_container.grid_remove()
         options = self.advanced_container
         for column in range(3):
@@ -189,7 +224,7 @@ class CodexMaintenanceGUI:
         self.repair_button.grid(row=0, column=0)
 
         log_frame = ttk.LabelFrame(main, text="搜索日志", padding=8)
-        log_frame.grid(row=5, column=0, sticky="nsew")
+        log_frame.grid(row=6, column=0, sticky="nsew")
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
 
@@ -201,6 +236,7 @@ class CodexMaintenanceGUI:
         scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=self.log.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.log.configure(yscrollcommand=scrollbar.set)
+        self.refresh_launch_mode()
 
     def create_summary_card(self, column: int, title: str, initial: str) -> None:
         frame = ttk.LabelFrame(self.summary_frame, text=title, padding=8)
@@ -215,6 +251,13 @@ class CodexMaintenanceGUI:
         frame.columnconfigure(0, weight=1)
         ttk.Checkbutton(frame, text=text, variable=variable).grid(row=0, column=0, sticky="w")
         ttk.Label(frame, text=help_text, wraplength=250, foreground="#555555").grid(row=1, column=0, sticky="w", pady=(2, 0))
+
+    def add_labeled_entry(self, parent: ttk.Frame, row: int, column: int, label: str, variable: StringVar) -> None:
+        frame = ttk.Frame(parent)
+        frame.grid(row=row, column=column, sticky="ew", padx=(0, 10), pady=4)
+        frame.columnconfigure(0, weight=1)
+        ttk.Label(frame, text=label).grid(row=0, column=0, sticky="w")
+        ttk.Entry(frame, textvariable=variable).grid(row=1, column=0, sticky="ew")
 
     def select_feature(self, name: str) -> None:
         self.feature_var.set(name)
@@ -237,8 +280,17 @@ class CodexMaintenanceGUI:
             current_values = list(self.home_combo.cget("values"))
             if selected not in current_values:
                 current_values.insert(0, selected)
-                self.home_combo.configure(values=current_values)
+            self.home_combo.configure(values=current_values)
             self.validate_codex_home()
+
+    def refresh_launch_mode(self) -> None:
+        mode = self.launch_mode.get()
+        state = "normal" if mode == "api" else "disabled"
+        for child in self.api_frame.winfo_children():
+            try:
+                child.configure(state=state)
+            except Exception:
+                pass
 
     def validate_codex_home(self) -> bool:
         codex_home = Path(self.codex_home_var.get()).expanduser()
@@ -310,6 +362,51 @@ class CodexMaintenanceGUI:
         )
         self.worker.start()
 
+    def configure_and_launch_codex(self) -> None:
+        if self.worker and self.worker.is_alive():
+            messagebox.showinfo("正在运行", "已有任务正在运行，请等待完成。")
+            return
+        if not self.validate_codex_home():
+            messagebox.showerror("目录无效", "请选择有效的 Codex 数据目录。")
+            return
+        if self.launch_mode.get() == "api":
+            missing = []
+            if not self.provider_key_var.get().strip():
+                missing.append("provider 键")
+            if not self.provider_name_var.get().strip():
+                missing.append("显示名称")
+            if not self.provider_base_url_var.get().strip():
+                missing.append("base_url")
+            if not self.provider_wire_api_var.get().strip():
+                missing.append("wire_api")
+            if not self.provider_requires_auth.get() and not self.provider_env_key_var.get().strip():
+                missing.append("env_key")
+            if missing:
+                messagebox.showerror("信息不完整", "请补全：" + "、".join(missing))
+                return
+
+        confirmed = messagebox.askyesno(
+            "确认配置并启动",
+            "工具会先写入当前启动方式对应的 provider 配置，自动对齐聊天，再启动 Codex Desktop。继续吗？",
+        )
+        if not confirmed:
+            return
+
+        self.append_log("开始准备启动 Codex...")
+        commands: list[list[str]] = [["__CONFIGURE_PROVIDER__"]]
+        if self.threadripper_command():
+            commands.append(["__THREADRIPPER_STATUS__"])
+            commands.append(["__AUTO_THREADRIPPER_SYNC__"])
+        elif self.install_threadripper.get():
+            npm = shutil.which("npm")
+            if npm:
+                commands.append([npm, "i", "-g", "codex-threadripper"])
+                commands.append(["__THREADRIPPER_STATUS__"])
+                commands.append(["__AUTO_THREADRIPPER_SYNC__"])
+        commands.append(self.base_repair_args(dry_run=False))
+        commands.append(["__LAUNCH_CODEX__"])
+        self.run_commands(commands, "配置并启动")
+
     def run_repair(self) -> None:
         if not self.ensure_ready("修复"):
             return
@@ -363,7 +460,11 @@ class CodexMaintenanceGUI:
     def command_worker(self, commands: list[list[str]], label: str) -> None:
         try:
             for command in commands:
-                if command == ["__THREADRIPPER_STATUS__"]:
+                if command == ["__CONFIGURE_PROVIDER__"]:
+                    self.configure_provider_for_launch()
+                    self.output_queue.put("已写入启动前 provider 配置。")
+                    continue
+                elif command == ["__THREADRIPPER_STATUS__"]:
                     threadripper = self.threadripper_command()
                     if not threadripper:
                         self.output_queue.put("未找到隐藏聊天识别修复工具，跳过状态检查。")
@@ -379,6 +480,14 @@ class CodexMaintenanceGUI:
                         self.output_queue.put("隐藏聊天识别已经对齐，跳过自动修复。")
                         continue
                     command = [threadripper, "--codex-home", self.codex_home_var.get(), "sync"]
+                elif command == ["__LAUNCH_CODEX__"]:
+                    exe = self.find_codex_desktop_exe()
+                    if not exe:
+                        self.output_queue.put("未找到 Codex Desktop 可执行文件，跳过启动。")
+                        continue
+                    subprocess.Popen([exe], cwd=str(Path(exe).parent), **self.subprocess_window_options())
+                    self.output_queue.put("Codex Desktop 已启动。")
+                    continue
                 self.output_queue.put("> " + " ".join(command))
                 process = subprocess.run(
                     command,
@@ -420,6 +529,79 @@ class CodexMaintenanceGUI:
             "startupinfo": startupinfo,
             "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
         }
+
+    def config_path(self) -> Path:
+        return Path(self.codex_home_var.get()).expanduser() / "config.toml"
+
+    def configure_provider_for_launch(self) -> None:
+        config_path = self.config_path()
+        if not config_path.exists():
+            raise RuntimeError(f"找不到配置文件：{config_path}")
+        raw = config_path.read_text(encoding="utf-8")
+        backup = config_path.with_name(f"config.toml.backup_ai_manager_{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+        backup.write_text(raw, encoding="utf-8")
+
+        if self.launch_mode.get() == "official":
+            updated = self.upsert_model_provider(raw, "openai")
+        else:
+            provider_key = self.provider_key_var.get().strip()
+            updated = self.upsert_model_provider(raw, provider_key)
+            updated = self.upsert_provider_block(
+                updated,
+                provider_key,
+                {
+                    "name": self.provider_name_var.get().strip(),
+                    "base_url": self.provider_base_url_var.get().strip(),
+                    "wire_api": self.provider_wire_api_var.get().strip(),
+                    "requires_openai_auth": self.provider_requires_auth.get(),
+                    "env_key": self.provider_env_key_var.get().strip(),
+                },
+            )
+        config_path.write_text(updated, encoding="utf-8")
+
+    def upsert_model_provider(self, raw: str, provider: str) -> str:
+        line = f'model_provider = "{provider}"'
+        if re.search(r'(?m)^model_provider\s*=\s*".*?"\s*$', raw):
+            return re.sub(r'(?m)^model_provider\s*=\s*".*?"\s*$', line, raw, count=1)
+
+        anchor = re.search(r'(?m)^model_reasoning_effort\s*=\s*".*?"\s*$', raw)
+        if anchor:
+            index = anchor.end()
+            return raw[:index] + "\n" + line + raw[index:]
+        return line + "\n" + raw
+
+    def upsert_provider_block(self, raw: str, provider_key: str, values: dict[str, object]) -> str:
+        block_lines = [f"[model_providers.{provider_key}]"]
+        block_lines.append(f'name = "{values["name"]}"')
+        block_lines.append(f'base_url = "{values["base_url"]}"')
+        block_lines.append(f'wire_api = "{values["wire_api"]}"')
+        if values.get("requires_openai_auth"):
+            block_lines.append("requires_openai_auth = true")
+        else:
+            env_key = str(values.get("env_key") or "").strip()
+            if env_key:
+                block_lines.append(f'env_key = "{env_key}"')
+            block_lines.append("supports_websockets = false")
+        block = "\n".join(block_lines) + "\n"
+
+        pattern = re.compile(rf"(?ms)^\[model_providers\.{re.escape(provider_key)}\]\n.*?(?=^\[|\Z)")
+        if pattern.search(raw):
+            return pattern.sub(block, raw, count=1)
+        if not raw.endswith("\n"):
+            raw += "\n"
+        return raw + "\n" + block
+
+    def find_codex_desktop_exe(self) -> str | None:
+        package_root = Path(r"C:\Program Files\WindowsApps")
+        try:
+            candidates = sorted(package_root.glob("OpenAI.Codex_*"), reverse=True)
+        except OSError:
+            candidates = []
+        for candidate in candidates:
+            exe = candidate / "app" / "Codex.exe"
+            if exe.exists():
+                return str(exe)
+        return None
 
     def try_update_summary(self, text: str) -> None:
         start = text.find("{")
@@ -463,6 +645,7 @@ class CodexMaintenanceGUI:
                     self.last_threadripper_status = data
                     rows = int(data.get("rows_needing_reconcile") or 0)
                     target = data.get("target_provider") or "未知"
+                    self.summary_labels["Provider"].set(str(target))
                     if rows > 0:
                         self.append_log(f"检测到隐藏聊天识别不匹配：{rows} 条需要修复，当前目标来源是 {target}。")
                     else:
