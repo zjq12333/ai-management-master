@@ -48,6 +48,7 @@ class CodexMaintenanceGUI:
         self.build_ui()
         self.validate_codex_home()
         self.root.after(100, self.drain_output_queue)
+        self.root.after(200, self.startup_preflight)
 
     def find_console_python(self) -> str:
         current = Path(sys.executable)
@@ -293,6 +294,21 @@ class CodexMaintenanceGUI:
     def search_chat_history(self) -> None:
         self.sync_provider.set(False)
         self.preview_repair()
+
+    def startup_preflight(self) -> None:
+        if not self.validate_codex_home():
+            return
+        if self.worker and self.worker.is_alive():
+            return
+        if not self.threadripper_command():
+            self.append_log("启动检查：未检测到隐藏聊天识别修复工具。")
+            return
+        self.worker = threading.Thread(
+            target=self.command_worker,
+            args=([["__THREADRIPPER_STATUS__"]], "启动检查"),
+            daemon=True,
+        )
+        self.worker.start()
 
     def run_repair(self) -> None:
         if not self.ensure_ready("修复"):
