@@ -761,12 +761,38 @@
     if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
       const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(composer), "value");
       descriptor?.set?.call(composer, value);
+      composer.value = value;
       composer.dispatchEvent(new Event("input", { bubbles: true }));
       composer.dispatchEvent(new Event("change", { bubbles: true }));
       return;
     }
-    composer.textContent = value;
+
+    const selection = window.getSelection?.();
+    const range = document.createRange();
+    range.selectNodeContents(composer);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    let inserted = false;
+    const beforeInput = new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "insertText",
+      data: value,
+    });
+    if (composer.dispatchEvent(beforeInput) && document.queryCommandSupported?.("insertText")) {
+      try {
+        inserted = document.execCommand("insertText", false, value);
+      } catch (_error) {
+        inserted = false;
+      }
+    }
+    if (!inserted || !composerText(composer).trim()) {
+      composer.textContent = value;
+    }
+
     composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+    composer.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   function composerActionRoot(composer) {
@@ -789,6 +815,31 @@
     }) || enabledButtons.at(-1) || null;
   }
 
+  function findReadySendButton(composer = null) {
+    const scope = composer ? composerActionRoot(composer) : document;
+    const enabledButtons = Array.from(scope.querySelectorAll("button")).filter((button) => {
+      const rect = button.getBoundingClientRect();
+      return rect.width > 0
+        && rect.height > 0
+        && !button.disabled
+        && button.getAttribute("aria-disabled") !== "true"
+        && button.getAttribute("data-disabled") !== "true";
+    });
+    const sendLike = enabledButtons.find((button) => {
+      const label = visibleText(button.getAttribute("aria-label") || button.getAttribute("title") || button.textContent);
+      const testId = visibleText(button.getAttribute("data-testid") || "");
+      return /发送|提交|send|submit/i.test(label)
+        || /send|submit/i.test(testId)
+        || button.type === "submit";
+    });
+    if (sendLike) return sendLike;
+
+    const formSubmit = composer?.closest?.("form")?.querySelector?.("button[type='submit']:not(:disabled)");
+    if (formSubmit && formSubmit.getAttribute("aria-disabled") !== "true") return formSubmit;
+
+    return enabledButtons.at(-1) || null;
+  }
+
   function composerText(composer) {
     if (!composer) return "";
     if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
@@ -805,13 +856,17 @@
 
   function fireButtonClick(button) {
     ["pointerdown", "mousedown", "mouseup", "pointerup", "click"].forEach((type) => {
-      button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      try {
+        button.dispatchEvent(new window.MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      } catch (_error) {
+        button.dispatchEvent(new window.MouseEvent(type, { bubbles: true, cancelable: true }));
+      }
     });
     button.click();
   }
 
   async function submitComposerPrompt(composer, prompt) {
-    const send = await waitFor(() => findSendButton(composer));
+    const send = await waitFor(() => findReadySendButton(composer));
     if (!send) throw new Error("未找到发送按钮");
     fireButtonClick(send);
     await new Promise((resolve) => setTimeout(resolve, 700));
@@ -1153,6 +1208,13 @@
     applyProjectMoveProjection();
     unlockMustInstallPluginButtons();
   }
+
+  window.__aiStrategistEnhancerInternals = {
+    ...(window.__aiStrategistEnhancerInternals || {}),
+    findReadySendButton,
+    setComposerValue,
+    submitComposerPrompt,
+  };
 
   scan();
   window.__aiStrategistEnhancerObserver?.disconnect?.();
