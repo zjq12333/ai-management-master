@@ -824,6 +824,33 @@
     }
   }
 
+  async function copyTextToClipboard(text) {
+    if (!text) return false;
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "true");
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      textarea.style.top = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      let copied = false;
+      try {
+        copied = document.execCommand("copy");
+      } catch {
+        copied = false;
+      } finally {
+        textarea.remove();
+      }
+      return copied;
+    }
+  }
+
   async function takeoverPrompt(prompt, cwd = "") {
     if (!prompt) throw new Error("移交提示词为空");
     const previousComposer = findComposer();
@@ -852,8 +879,16 @@
       }
       const prompt = decodePrompt(result);
       if (!prompt) throw new Error("接管提示词为空");
-      await takeoverPrompt(prompt, result.workspace_path || result.cwd || "");
-      showToast("已移交到同工作目录的新对话");
+      try {
+        await takeoverPrompt(prompt, result.workspace_path || result.cwd || "");
+        showToast("已移交到同工作目录的新对话");
+      } catch (error) {
+        const copied = await copyTextToClipboard(prompt);
+        const reason = error instanceof Error ? error.message : "自动打开新对话失败";
+        showToast(copied
+          ? `移交文件已生成，${reason}，已复制接管提示`
+          : `移交文件已生成，${reason}，请手动复制接管提示`);
+      }
     } finally {
       actionButton.disabled = false;
       actionButton.textContent = previousText;

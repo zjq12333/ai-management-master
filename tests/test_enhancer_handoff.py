@@ -93,6 +93,8 @@ class EnhancerHandoffTests(unittest.TestCase):
             self.assertIn("- Last assistant response: 我会先看当前状态", content)
             self.assertIn("## Local Snapshot", content)
             self.assertIn("## Progress Ledger", content)
+            self.assertIn("- Done / current evidence: 我会先看当前状态", content)
+            self.assertIn("- Next action cue: 先检查 handoff 逻辑", content)
             self.assertIn("## Verification", content)
             self.assertIn("## Watchouts", content)
             self.assertIn("先检查 handoff 逻辑", content)
