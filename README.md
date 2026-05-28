@@ -80,6 +80,12 @@ AI Strategist.exe
 - 当前执行计划：`docs/plans/EXECUTION_PLAN.md`
 - v0.1 发布检查：`docs/release/V0_1_RELEASE_CHECKLIST.md`
 
+本地统一验证：
+
+```powershell
+.\Verify-AI-Strategist.ps1
+```
+
 ## 旧 Tkinter 入口
 
 旧的 Python/Tkinter 工具仍保留为参考和回退入口：

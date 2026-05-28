@@ -34,6 +34,14 @@ Those ideas can remain historical context or future candidates, but they must no
 
 ## Common Commands
 
+Run the full verification suite from the repository root:
+
+```powershell
+.\Verify-AI-Strategist.ps1
+```
+
+Desktop-only commands:
+
 ```powershell
 pnpm --dir ai-strategist-desktop dev
 pnpm --dir ai-strategist-desktop build

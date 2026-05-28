@@ -34,6 +34,14 @@
 
 ## 常用命令
 
+从仓库根目录运行完整验证：
+
+```powershell
+.\Verify-AI-Strategist.ps1
+```
+
+桌面端单独运行：
+
 ```powershell
 pnpm --dir ai-strategist-desktop dev
 pnpm --dir ai-strategist-desktop build

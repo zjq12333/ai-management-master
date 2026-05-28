@@ -16,6 +16,21 @@ This directory is the documentation map for the current AI Strategist project.
 - [Enhancer Feature Matrix](plans/enhancer/ENHANCER_FEATURE_MATRIX.md): feature classification and sequencing.
 - [Enhancer Architecture Options](plans/enhancer/ENHANCER_ARCHITECTURE_OPTIONS.md): architecture tradeoffs for enhancer work.
 
+## Verification
+
+Run the local verification suite from the repository root:
+
+```powershell
+.\Verify-AI-Strategist.ps1
+```
+
+Useful fast-path options:
+
+```powershell
+.\Verify-AI-Strategist.ps1 -SkipFrontendBuild
+.\Verify-AI-Strategist.ps1 -SkipRust
+```
+
 ## Archive
 
 - [Historical handoffs](archive/handoffs/): previous project handoff files. These preserve context but should not override the current README or execution plan.
