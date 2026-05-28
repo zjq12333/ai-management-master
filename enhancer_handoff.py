@@ -15,7 +15,15 @@ import repair_codex_desktop_history as history_repair
 MAX_RECENT_MESSAGES = 8
 MAX_MESSAGE_CHARS = 1200
 MAX_GIT_STATUS_LINES = 30
-MAX_EMBEDDED_HANDOFF_CHARS = 20_000
+MAX_EMBEDDED_HANDOFF_CHARS = 4_000
+RESUME_META_MARKERS = (
+    "continue the same task",
+    "do not re-analyze from zero",
+    "read this handoff file",
+    "embedded handoff",
+    "handoff file path",
+    "resume entry",
+)
 
 
 @dataclass
@@ -36,7 +44,7 @@ def _preview_text(value: str | None, limit: int = 160) -> str:
     text = " ".join(str(value or "").split())
     if len(text) <= limit:
         return text
-    return text[: max(0, limit - 1)].rstrip() + "…"
+    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 def _safe_slug(value: str, fallback: str) -> str:
@@ -118,8 +126,10 @@ def _collect_recent_messages(rollout_path: str) -> list[dict[str, str]]:
             continue
         payload = row.get("payload")
         if not isinstance(payload, dict):
+            payload = row.get("item")
+        if not isinstance(payload, dict):
             continue
-        if payload.get("type") != "message":
+        if payload.get("type") not in {"message", None}:
             continue
 
         role = str(payload.get("role") or "").strip().lower()
@@ -156,6 +166,36 @@ def _latest_message(recent_messages: list[dict[str, str]], role: str) -> str:
     for message in reversed(recent_messages):
         if message.get("role") == role:
             return str(message.get("text") or "").strip()
+    return ""
+
+
+def _is_resume_meta_message(text: str) -> bool:
+    lowered = str(text or "").lower()
+    if any(marker in lowered for marker in RESUME_META_MARKERS):
+        return True
+    # Chinese resume prompts often include an English "handoff" token alongside
+    # repeated instructions to continue the same task or read a file path.
+    return "handoff" in lowered and any(
+        marker in lowered
+        for marker in ("继续", "不要从零", "文件路径", "读取", "内联")
+    )
+
+
+def _latest_non_meta_message(recent_messages: list[dict[str, str]], role: str) -> str:
+    for message in reversed(recent_messages):
+        if message.get("role") != role:
+            continue
+        text = str(message.get("text") or "").strip()
+        if text and not _is_resume_meta_message(text):
+            return text
+    return ""
+
+
+def _first_non_meta_text(*values: str) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text and not _is_resume_meta_message(text):
+            return text
     return ""
 
 
@@ -212,9 +252,20 @@ def _render_handoff(
     local_snapshot: dict[str, object],
 ) -> str:
     created_at = datetime.now().astimezone().isoformat()
-    objective = _preview_text(record.title or record.first_user_message or record.thread_id, 200)
-    last_user_request = _preview_text(_latest_message(recent_messages, "user") or record.first_user_message, 240)
-    last_assistant_response = _preview_text(_latest_message(recent_messages, "assistant"), 240)
+    real_user_request = _latest_non_meta_message(recent_messages, "user")
+    latest_raw_user_request = _latest_message(recent_messages, "user")
+    objective_source = _first_non_meta_text(record.title, record.first_user_message, real_user_request)
+    objective = _preview_text(objective_source or record.thread_id, 200)
+    last_user_request = _preview_text(real_user_request, 240)
+    original_request = _first_non_meta_text(record.first_user_message, real_user_request)
+    if (
+        latest_raw_user_request
+        and _is_resume_meta_message(latest_raw_user_request)
+        and original_request
+        and last_user_request == _preview_text(original_request, 240)
+    ):
+        last_user_request = ""
+    last_assistant_response = _preview_text(_latest_non_meta_message(recent_messages, "assistant"), 240)
     lines = [
         "# AI Strategist Handoff",
         "",
@@ -225,13 +276,13 @@ def _render_handoff(
         f"- Title: {objective}",
     ]
 
-    if record.first_user_message.strip():
+    if original_request:
         lines.extend(
             [
                 "",
                 "## Original Request",
                 "",
-                record.first_user_message.strip(),
+                original_request,
             ]
         )
 
@@ -269,7 +320,7 @@ def _render_handoff(
             "## Progress Ledger",
             "",
             f"- Done / current evidence: {last_assistant_response or 'Infer from recent messages and current workspace state.'}",
-            f"- Next action cue: {last_user_request or last_assistant_response or 'Inspect the handoff and continue the active task.'}",
+            f"- Next action cue: {last_user_request or 'Infer from current workspace state.'}",
             "- Relevant files: Not captured in this stage; inspect only files needed for the next concrete step.",
             "",
             "## Verification",
@@ -294,6 +345,8 @@ def _render_handoff(
     if recent_messages:
         lines.extend(["", "## Recent Messages", ""])
         for message in recent_messages:
+            if _is_resume_meta_message(message.get("text", "")):
+                continue
             role = "User" if message["role"] == "user" else "Assistant"
             lines.append(f"### {role}")
             lines.append("")
@@ -312,23 +365,22 @@ def _render_handoff(
     return "\n".join(lines)
 
 
+
 def _build_takeover_prompt(handoff_path: Path, handoff_content: str) -> str:
     embedded = handoff_content.strip()
     truncated = len(embedded) > MAX_EMBEDDED_HANDOFF_CHARS
     if truncated:
         embedded = embedded[:MAX_EMBEDDED_HANDOFF_CHARS].rstrip()
     return (
-        "继续同一任务，不要从零重新分析。\n"
-        "下面已经内联了 handoff 内容；优先直接依据它继续执行。\n"
-        f"handoff 文件路径：{handoff_path}\n"
-        "不要回复“我会读取”或“我将继续”；请立刻执行 handoff 里的 Next action cue。\n"
-        "仅在内联 handoff 不足以支撑下一步时，再补读必要文件或最新本地状态。\n"
+        "Continue the same task; do not restart analysis from zero.\n"
+        f"Handoff file: {handoff_path}\n"
+        "Execute the Next action cue below. Read the handoff file only if this summary is insufficient.\n"
         "\n"
-        "## Embedded Handoff\n"
+        "## Handoff Summary\n"
         "\n"
         f"{embedded}"
         + (
-            "\n\n[Embedded handoff truncated. Read the handoff file path above if more context is needed.]"
+            "\n\n[Handoff summary truncated. Read the handoff file path above if more context is needed.]"
             if truncated
             else ""
         )
@@ -348,7 +400,7 @@ def create_handoff(codex_home: Path, thread_id: str, title_hint: str = "") -> di
     handoff_root = _handoff_root(codex_home, record.cwd)
     handoff_root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    name_seed = title_hint or record.title or record.first_user_message or record.thread_id
+    name_seed = _first_non_meta_text(title_hint, record.title, record.first_user_message) or record.thread_id
     handoff_path = handoff_root / f"{stamp}-{_safe_slug(_preview_text(name_seed, 48), record.thread_id)}-handoff.md"
 
     handoff_content = _render_handoff(record, handoff_path, recent_messages, local_snapshot)

@@ -100,9 +100,9 @@ class EnhancerHandoffTests(unittest.TestCase):
             self.assertIn("先检查 handoff 逻辑", content)
             self.assertIn("我会先看当前状态", content)
             self.assertIn(str(handoff_path), result["prompt"])
-            self.assertIn("## Embedded Handoff", result["prompt"])
-            self.assertIn("Current objective: 测试移交", result["prompt"])
-            self.assertIn("不要回复“我会读取”或“我将继续”", result["prompt"])
+            self.assertIn("## Handoff Summary", result["prompt"])
+            self.assertIn("Current objective:", result["prompt"])
+            self.assertIn("Execute the Next action cue below", result["prompt"])
 
     def test_create_handoff_falls_back_to_codex_home_when_workspace_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -189,6 +189,90 @@ class EnhancerHandoffTests(unittest.TestCase):
             self.assertIn("- Git branch: handoff-test", content)
             self.assertIn(" M tracked.txt", content)
             self.assertIn("?? new.txt", content)
+
+    def test_create_handoff_filters_resume_meta_messages(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_home = root / ".codex"
+            codex_home.mkdir(parents=True, exist_ok=True)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            previous_handoff = workspace / ".ai-strategist" / "handoffs" / "previous-handoff.md"
+            previous_handoff.parent.mkdir(parents=True, exist_ok=True)
+            previous_handoff.write_text("# Previous\n\nKeep going.\n", encoding="utf-8")
+            resume_meta = (
+                "Continue the same task, do not re-analyze from zero. "
+                f"Read this handoff file first: {previous_handoff}. "
+                "Embedded Handoff # AI Strategist Handoff"
+            )
+            rollout = codex_home / "rollout.jsonl"
+            rollout.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "type": "response_item",
+                                "item": {
+                                    "role": "user",
+                                    "content": [{"type": "input_text", "text": "Build the transfer feature."}],
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "response_item",
+                                "item": {
+                                    "role": "assistant",
+                                    "content": [{"type": "output_text", "text": "Implemented phase one."}],
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "response_item",
+                                "item": {
+                                    "role": "user",
+                                    "content": [{"type": "input_text", "text": resume_meta}],
+                                },
+                            }
+                        ),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            db_path = codex_home / "state_5.sqlite"
+            con = sqlite3.connect(db_path)
+            con.execute(
+                """
+                create table threads (
+                    id text primary key,
+                    cwd text,
+                    rollout_path text,
+                    title text,
+                    first_user_message text,
+                    updated_at integer
+                )
+                """
+            )
+            con.execute(
+                "insert into threads values (?, ?, ?, ?, ?, ?)",
+                ("thread-4", str(workspace), str(rollout), resume_meta, resume_meta, 1),
+            )
+            con.commit()
+            con.close()
+
+            result = enhancer_handoff.create_handoff(codex_home, "thread-4")
+
+            content = Path(result["handoff_path"]).read_text(encoding="utf-8")
+            prompt = result["prompt"]
+            self.assertIn("- Title: Build the transfer feature.", content)
+            self.assertIn("## Original Request\n\nBuild the transfer feature.", content)
+            self.assertIn("- Next action cue: Infer from current workspace state.", content)
+            self.assertNotIn("Embedded Handoff", content)
+            self.assertNotIn("Read this handoff file first", prompt)
+            self.assertIn("## Handoff Summary", prompt)
+            self.assertLessEqual(len(prompt), 4600)
 
 
 if __name__ == "__main__":
