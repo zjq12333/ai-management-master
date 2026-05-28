@@ -789,6 +789,50 @@
     }) || enabledButtons.at(-1) || null;
   }
 
+  function composerText(composer) {
+    if (!composer) return "";
+    if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
+      return composer.value || "";
+    }
+    return composer.innerText || composer.textContent || "";
+  }
+
+  function composerContainsPrompt(composer, prompt) {
+    const current = visibleText(composerText(composer));
+    const expected = visibleText(prompt);
+    return Boolean(current && expected && (current.includes(expected) || expected.includes(current)));
+  }
+
+  function fireButtonClick(button) {
+    ["pointerdown", "mousedown", "mouseup", "pointerup", "click"].forEach((type) => {
+      button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    });
+    button.click();
+  }
+
+  async function submitComposerPrompt(composer, prompt) {
+    const send = await waitFor(() => findSendButton(composer));
+    if (!send) throw new Error("未找到发送按钮");
+    fireButtonClick(send);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    if (!composerContainsPrompt(composer, prompt)) return;
+
+    const form = composer.closest?.("form");
+    if (form?.requestSubmit) {
+      form.requestSubmit();
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      if (!composerContainsPrompt(composer, prompt)) return;
+    }
+
+    composer.focus();
+    composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+    composer.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    if (composerContainsPrompt(composer, prompt)) {
+      throw new Error("接管提示仍停留在输入框，未成功发送");
+    }
+  }
+
   async function waitFor(factory, timeoutMs = 6_000) {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
@@ -861,9 +905,7 @@
     const composer = await waitForFreshComposer(previousComposer, previousLocation);
     if (!composer) throw new Error("新对话未打开");
     setComposerValue(composer, prompt);
-    const send = await waitFor(() => findSendButton(composer));
-    if (!send) throw new Error("未找到发送按钮");
-    send.click();
+    await submitComposerPrompt(composer, prompt);
   }
 
   async function createContextHandoff(row, actionButton) {

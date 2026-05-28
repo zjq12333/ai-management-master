@@ -24,6 +24,9 @@ def test_enhancer_renderer_script_contains_project_move_contract():
 def test_enhancer_renderer_script_copies_handoff_prompt_when_takeover_fails():
     text = Path("enhancer_renderer_inject.js").read_text(encoding="utf-8")
     assert "function copyTextToClipboard" in text
+    assert "function submitComposerPrompt" in text
+    assert "function composerContainsPrompt" in text
+    assert "接管提示仍停留在输入框，未成功发送" in text
     assert "自动打开新对话失败" in text
     assert "已复制接管提示" in text
     assert "await copyTextToClipboard(prompt)" in text
