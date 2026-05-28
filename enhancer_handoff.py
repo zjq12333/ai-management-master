@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import sqlite3
 import subprocess
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ MAX_RECENT_MESSAGES = 8
 MAX_MESSAGE_CHARS = 1200
 MAX_GIT_STATUS_LINES = 30
 MAX_TAKEOVER_FIELD_CHARS = 700
+THREAD_ID_RE = re.compile(r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$", re.IGNORECASE)
 RESUME_META_MARKERS = (
     "continue the same task",
     "do not re-analyze from zero",
@@ -209,6 +211,31 @@ def _handoff_section_value(handoff_content: str, prefix: str) -> str:
     return ""
 
 
+def _looks_like_thread_id(value: str) -> bool:
+    return bool(THREAD_ID_RE.match(str(value or "").strip()))
+
+
+def _derive_objective_from_evidence(evidence: str) -> str:
+    text = str(evidence or "")
+    patterns = (
+        r"做完了\s+(.+?)\s+的第一版",
+        r"completed\s+(.+?)(?:\.|$)",
+        r"`[0-9a-f]{7,40}\s+(.+?)`",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        candidate = match.group(1).strip(" `。.;:")
+        if not candidate:
+            continue
+        words = candidate.split()
+        if words and all(part.islower() or part in {"+", "&", "/", "-"} for part in words):
+            candidate = " ".join(word.capitalize() if word.isalpha() else word for word in words)
+        return _preview_text(candidate, MAX_TAKEOVER_FIELD_CHARS)
+    return ""
+
+
 def _run_git(workspace: Path, args: list[str]) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -381,6 +408,10 @@ def _build_takeover_prompt(handoff_path: Path, handoff_content: str) -> str:
     next_action = _handoff_section_value(handoff_content, "- Next action cue:")
     evidence = _handoff_section_value(handoff_content, "- Done / current evidence:")
     workspace = _handoff_section_value(handoff_content, "- Workspace:")
+    if _looks_like_thread_id(objective) or not objective:
+        objective = _derive_objective_from_evidence(evidence) or objective
+    if next_action == "Infer from current workspace state.":
+        next_action = ""
     lines = [
         "Continue the same task; do not restart analysis from zero.",
         f"Handoff file: {handoff_path}",

@@ -276,6 +276,34 @@ class EnhancerHandoffTests(unittest.TestCase):
             self.assertNotIn("## Handoff Summary", prompt)
             self.assertLessEqual(len(prompt), 1800)
 
+    def test_takeover_prompt_derives_objective_from_evidence_when_title_is_thread_id(self):
+        thread_id = "019e6ec7-3add-7d73-aa56-8bb639a5649a"
+        handoff_content = "\n".join(
+            [
+                "# AI Strategist Handoff",
+                "",
+                f"- Title: {thread_id}",
+                "",
+                "## Task State",
+                "",
+                f"- Current objective: {thread_id}",
+                "- Last user request: (not captured)",
+                "- Last assistant response: 已把这个版本固定成 Git 提交： `e8b1f82 Add request ledger token savings meter` 这次做完了 Request Ledger + Token Savings Meter 的第一版。",
+                "",
+                "## Progress Ledger",
+                "",
+                "- Done / current evidence: 已把这个版本固定成 Git 提交： `e8b1f82 Add request ledger token savings meter` 这次做完了 Request Ledger + Token Savings Meter 的第一版。",
+                "- Next action cue: Infer from current workspace state.",
+            ]
+        )
+
+        prompt = enhancer_handoff._build_takeover_prompt(Path(r"D:\AIHub\.ai-strategist\handoffs\handoff.md"), handoff_content)
+
+        self.assertIn("Objective: Request Ledger + Token Savings Meter", prompt)
+        self.assertNotIn(f"Objective: {thread_id}", prompt)
+        self.assertIn("Current evidence:", prompt)
+        self.assertLessEqual(len(prompt), 1800)
+
 
 if __name__ == "__main__":
     unittest.main()
