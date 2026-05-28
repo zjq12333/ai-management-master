@@ -236,6 +236,13 @@ def _derive_objective_from_evidence(evidence: str) -> str:
     return ""
 
 
+def _derive_next_action_from_evidence(evidence: str) -> str:
+    objective = _derive_objective_from_evidence(evidence)
+    if not objective:
+        return ""
+    return _preview_text(f"Continue {objective}.", MAX_TAKEOVER_FIELD_CHARS)
+
+
 def _run_git(workspace: Path, args: list[str]) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -411,7 +418,7 @@ def _build_takeover_prompt(handoff_path: Path, handoff_content: str) -> str:
     if _looks_like_thread_id(objective) or not objective:
         objective = _derive_objective_from_evidence(evidence) or objective
     if next_action == "Infer from current workspace state.":
-        next_action = ""
+        next_action = _derive_next_action_from_evidence(evidence)
     lines = [
         "Continue the same task; do not restart analysis from zero.",
         f"Handoff file: {handoff_path}",
@@ -428,6 +435,7 @@ def _build_takeover_prompt(handoff_path: Path, handoff_content: str) -> str:
         [
             "Read the handoff file only if these fields are insufficient.",
             "Start by executing the Next action cue; do not explain that you will read the handoff.",
+            "Communicate with the user in Chinese, but you may keep task work artifacts in English when appropriate.",
         ]
     )
     return (

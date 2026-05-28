@@ -102,6 +102,10 @@ class EnhancerHandoffTests(unittest.TestCase):
             self.assertIn(str(handoff_path), result["prompt"])
             self.assertIn("Objective:", result["prompt"])
             self.assertIn("Next action cue:", result["prompt"])
+            self.assertIn(
+                "Communicate with the user in Chinese, but you may keep task work artifacts in English when appropriate.",
+                result["prompt"],
+            )
             self.assertNotIn("## Handoff Summary", result["prompt"])
             self.assertLessEqual(len(result["prompt"]), 1800)
 
@@ -301,6 +305,12 @@ class EnhancerHandoffTests(unittest.TestCase):
 
         self.assertIn("Objective: Request Ledger + Token Savings Meter", prompt)
         self.assertNotIn(f"Objective: {thread_id}", prompt)
+        self.assertIn("Next action cue: Continue Request Ledger + Token Savings Meter.", prompt)
+        self.assertNotIn("Next action cue: Infer from current workspace state.", prompt)
+        self.assertIn(
+            "Communicate with the user in Chinese, but you may keep task work artifacts in English when appropriate.",
+            prompt,
+        )
         self.assertIn("Current evidence:", prompt)
         self.assertLessEqual(len(prompt), 1800)
 
