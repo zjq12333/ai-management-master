@@ -3,23 +3,11 @@
   "identifier": "default",
   "description": "Default permissions for AI Strategist",
   "windows": [
-    "main",
-    "hotspot",
-    "voice-overlay",
-    "voice-search-overlay"
+    "main"
   ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
-    "dialog:default",
-    "dialog:allow-open",
-    "dialog:allow-save",
-    "dialog:allow-message",
-    "dialog:allow-ask",
-    "dialog:allow-confirm",
-    "shell:allow-open",
-    "process:default",
-    "process:allow-restart",
     "updater:default"
   ]
 }

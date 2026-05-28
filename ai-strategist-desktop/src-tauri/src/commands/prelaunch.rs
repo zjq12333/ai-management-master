@@ -32,6 +32,27 @@ fn repo_root_from_manifest() -> PathBuf {
         .to_path_buf()
 }
 
+fn bridge_script_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("AI_STRATEGIST_PRELAUNCH_BRIDGE") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return path;
+        }
+    }
+
+    let bundled = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+        .map(|dir| dir.join("resources").join("prelaunch_bridge.py"));
+    if let Some(path) = bundled {
+        if path.exists() {
+            return path;
+        }
+    }
+
+    repo_root_from_manifest().join("prelaunch_bridge.py")
+}
+
 fn python_command() -> String {
     crate::platform::runtime_resolver::resolve_python_runtime()
         .path
@@ -85,10 +106,7 @@ fn bridge_command_with_mode(
 ) -> Vec<String> {
     let mut command = vec![
         python_command(),
-        repo_root_from_manifest()
-            .join("prelaunch_bridge.py")
-            .display()
-            .to_string(),
+        bridge_script_path().display().to_string(),
         subcommand.to_string(),
         "--codex-home".to_string(),
         codex_home.to_string(),
@@ -914,18 +932,67 @@ pub fn prelaunch_repair(
 mod tests {
     use super::{
         bridge_command, bridge_command_with_mode, bridge_command_with_recovery_options,
-        bridge_runtime_environment, python_command, resolved_threadripper_env_value, RecoveryOptions,
+        bridge_runtime_environment, bridge_script_path, python_command, repo_root_from_manifest,
+        resolved_threadripper_env_value, RecoveryOptions,
     };
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn legacy_bridge_command_uses_repo_root_bridge_for_mutating_subcommands() {
+    fn bridge_command_uses_resolved_bridge_script_for_mutating_subcommands() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var_os("AI_STRATEGIST_PRELAUNCH_BRIDGE");
+        std::env::remove_var("AI_STRATEGIST_PRELAUNCH_BRIDGE");
         let command = bridge_command("repair", r"C:\Users\test\.codex");
         assert!(!command[0].is_empty());
         assert_eq!(command[0], python_command());
         assert!(command[1].ends_with("prelaunch_bridge.py"));
         assert_eq!(command[2], "repair");
+        if let Some(previous) = previous {
+            std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", previous);
+        }
+    }
+
+    #[test]
+    fn bridge_script_path_prefers_existing_explicit_environment_override() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var_os("AI_STRATEGIST_PRELAUNCH_BRIDGE");
+        let bridge = std::env::temp_dir().join(format!(
+            "ai-strategist-custom-bridge-{}.py",
+            std::process::id()
+        ));
+        fs::write(&bridge, "# test bridge").expect("write bridge");
+        std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", &bridge);
+
+        assert_eq!(bridge_script_path(), bridge);
+        fs::remove_file(&bridge).ok();
+
+        if let Some(previous) = previous {
+            std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", previous);
+        } else {
+            std::env::remove_var("AI_STRATEGIST_PRELAUNCH_BRIDGE");
+        }
+    }
+
+    #[test]
+    fn bridge_script_path_falls_back_to_development_repo_bridge() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var_os("AI_STRATEGIST_PRELAUNCH_BRIDGE");
+        std::env::set_var(
+            "AI_STRATEGIST_PRELAUNCH_BRIDGE",
+            repo_root_from_manifest().join("missing_bridge.py"),
+        );
+
+        assert_eq!(bridge_script_path(), repo_root_from_manifest().join("prelaunch_bridge.py"));
+
+        if let Some(previous) = previous {
+            std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", previous);
+        } else {
+            std::env::remove_var("AI_STRATEGIST_PRELAUNCH_BRIDGE");
+        }
     }
 
     #[test]
