@@ -22,11 +22,13 @@ ai-strategist-desktop/src-tauri/target/
 ai-strategist-desktop/src-tauri/gen/
 *.tsbuildinfo
 
-# Local verification artifacts and vendored upstream checkouts.
+# Local verification artifacts.
 artifacts/
 !artifacts/.gitkeep
 artifacts/upstream/
-third_party/
-!third_party/.gitkeep
+
+# Vendored upstream source is required by the Tauri build; ignore only its
+# nested Git metadata and generated Rust outputs.
+third_party/**/.git/
 third_party/codex-plus-plus/target/
 
