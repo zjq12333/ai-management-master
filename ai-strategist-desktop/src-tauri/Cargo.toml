@@ -2,7 +2,7 @@
 name = "ai-strategist"
 version = "1.0.0"
 default-run = "AI-Strategist"
-description = "AI Strategist for Codex 鈥?launch, repair, MCP, Skills, Custom Instructions, and more"
+description = "AI Strategist for Codex - local launch and repair desktop shell"
 authors = ["borawong"]
 license = "Apache-2.0"
 edition = "2021"

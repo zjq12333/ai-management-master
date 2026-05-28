@@ -115,7 +115,7 @@ Deliverables:
 
 Primary reference:
 
-- `PRODUCTIZATION_CHECKLIST.md`
+- `docs/plans/PRODUCTIZATION_CHECKLIST.md`
 
 ### Phase 4: Installer / Runtime Integration
 
@@ -157,9 +157,9 @@ Target outcomes:
   - chat/history repair behavior
 - `README.md`
   - user-facing current behavior
-- `HANDOFF.md`
-  - current operational handoff
-- `PRODUCTIZATION_CHECKLIST.md`
+- `docs/README.md`
+  - documentation tree and source-of-truth map
+- `docs/plans/PRODUCTIZATION_CHECKLIST.md`
   - productization execution checklist
 
 ## Documentation Cleanup Rule

@@ -1,5 +1,8 @@
 ﻿# AI Strategist 交接文件
 
+> Archive note: this file is preserved as historical context. Use `README.md`
+> and `docs/README.md` as the current documentation entry points.
+
 ## 项目位置
 
 - 本地目录：`D:\我的空间\工作\pilot文件夹\AI-Strategist`
@@ -97,7 +100,7 @@
   - 聊天恢复核心逻辑。
 - `tests/test_prelaunch_bridge.py`
   - Python 桥接测试。
-- `PRODUCTIZATION_CHECKLIST.md`
+- `docs/plans/PRODUCTIZATION_CHECKLIST.md`
   - 桌面产品化改造清单。
 
 ## 验证命令
@@ -114,10 +117,10 @@ cargo test --manifest-path ai-strategist-desktop/src-tauri/Cargo.toml prelaunch
 ## 当前文档同步状态
 
 - `README.md` 已更新为当前产品说明。
-- `HANDOFF.md` 已更新为当前 Tauri 主线与产品化主线交接。
-- `AI_STRATEGIST_CLONE_HANDOFF.md` 保持历史来源说明，不再作为当前主线目标。
-- `EXECUTION_PLAN.md` 已更新为当前阶段计划。
-- `PRODUCTIZATION_CHECKLIST.md` 已新增为产品化改造主清单。
+- Historical handoff files now live under `docs/archive/handoffs/`.
+- `docs/README.md` is the current documentation map.
+- `docs/plans/EXECUTION_PLAN.md` describes the current active plan.
+- `docs/plans/PRODUCTIZATION_CHECKLIST.md` is the productization checklist.
 
 ## 下一步建议
 
@@ -128,4 +131,5 @@ cargo test --manifest-path ai-strategist-desktop/src-tauri/Cargo.toml prelaunch
 
 ## 新窗口接力口令
 
-请先阅读本文件、`EXECUTION_PLAN.md`、`PRODUCTIZATION_CHECKLIST.md`、`AI_STRATEGIST_CLONE_HANDOFF.md`，按当前阶段继续；不要从零重新分析。
+This file is archived. For new work, start from `README.md`, `docs/README.md`,
+`docs/plans/EXECUTION_PLAN.md`, and `docs/plans/PRODUCTIZATION_CHECKLIST.md`.

@@ -73,9 +73,12 @@ AI Strategist.exe
 - 不假设用户已安装 Python / Git / threadripper
 - 主流程必须自带运行时、自带依赖、自检并可降级
 
-对应改造清单见：
+对应文档见：
 
-- `PRODUCTIZATION_CHECKLIST.md`
+- 文档地图：`docs/README.md`
+- 产品化检查：`docs/plans/PRODUCTIZATION_CHECKLIST.md`
+- 当前执行计划：`docs/plans/EXECUTION_PLAN.md`
+- v0.1 发布检查：`docs/release/V0_1_RELEASE_CHECKLIST.md`
 
 ## 旧 Tkinter 入口
 

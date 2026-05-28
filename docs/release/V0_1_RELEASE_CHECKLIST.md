@@ -111,11 +111,11 @@ Acceptance: each mode is reproducible **3 times in a row** with the same evidenc
 ## 7) Documentation
 
 - ✅ `README.md` describes AI Strategist and the `启动与修复` workflow.
-- ✅ `HANDOFF.md` reflects the current Tauri shell direction and current productization track.
-- ✅ `AI_STRATEGIST_CLONE_HANDOFF.md` is historical context only and must not define current branding.
-- ✅ `EXECUTION_PLAN.md` references the current execution tracks and stays up-to-date.
-- ✅ `PRODUCTIZATION_CHECKLIST.md` exists and defines required runtime/self-check work before claiming general delivery.
-- ✅ A short operator guide exists in README/HANDOFF form:
+- ✅ `docs/README.md` maps the active docs tree and archived references.
+- ✅ Historical handoff files live under `docs/archive/handoffs/` and must not define current branding.
+- ✅ `docs/plans/EXECUTION_PLAN.md` references the current execution tracks and stays up-to-date.
+- ✅ `docs/plans/PRODUCTIZATION_CHECKLIST.md` exists and defines required runtime/self-check work before claiming general delivery.
+- ✅ A short operator guide exists in README/docs form:
   - how to run each mode
   - what success looks like
   - what evidence to check when it fails
