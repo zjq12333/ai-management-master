@@ -15,7 +15,7 @@ import repair_codex_desktop_history as history_repair
 MAX_RECENT_MESSAGES = 8
 MAX_MESSAGE_CHARS = 1200
 MAX_GIT_STATUS_LINES = 30
-MAX_EMBEDDED_HANDOFF_CHARS = 4_000
+MAX_TAKEOVER_FIELD_CHARS = 700
 RESUME_META_MARKERS = (
     "continue the same task",
     "do not re-analyze from zero",
@@ -199,6 +199,16 @@ def _first_non_meta_text(*values: str) -> str:
     return ""
 
 
+def _handoff_section_value(handoff_content: str, prefix: str) -> str:
+    for line in handoff_content.splitlines():
+        if line.startswith(prefix):
+            value = line.removeprefix(prefix).strip()
+            if _is_resume_meta_message(value):
+                return ""
+            return _preview_text(value, MAX_TAKEOVER_FIELD_CHARS)
+    return ""
+
+
 def _run_git(workspace: Path, args: list[str]) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -367,23 +377,30 @@ def _render_handoff(
 
 
 def _build_takeover_prompt(handoff_path: Path, handoff_content: str) -> str:
-    embedded = handoff_content.strip()
-    truncated = len(embedded) > MAX_EMBEDDED_HANDOFF_CHARS
-    if truncated:
-        embedded = embedded[:MAX_EMBEDDED_HANDOFF_CHARS].rstrip()
+    objective = _handoff_section_value(handoff_content, "- Current objective:")
+    next_action = _handoff_section_value(handoff_content, "- Next action cue:")
+    evidence = _handoff_section_value(handoff_content, "- Done / current evidence:")
+    workspace = _handoff_section_value(handoff_content, "- Workspace:")
+    lines = [
+        "Continue the same task; do not restart analysis from zero.",
+        f"Handoff file: {handoff_path}",
+    ]
+    if workspace:
+        lines.append(f"Workspace: {workspace}")
+    if objective:
+        lines.append(f"Objective: {objective}")
+    if next_action:
+        lines.append(f"Next action cue: {next_action}")
+    if evidence:
+        lines.append(f"Current evidence: {evidence}")
+    lines.extend(
+        [
+            "Read the handoff file only if these fields are insufficient.",
+            "Start by executing the Next action cue; do not explain that you will read the handoff.",
+        ]
+    )
     return (
-        "Continue the same task; do not restart analysis from zero.\n"
-        f"Handoff file: {handoff_path}\n"
-        "Execute the Next action cue below. Read the handoff file only if this summary is insufficient.\n"
-        "\n"
-        "## Handoff Summary\n"
-        "\n"
-        f"{embedded}"
-        + (
-            "\n\n[Handoff summary truncated. Read the handoff file path above if more context is needed.]"
-            if truncated
-            else ""
-        )
+        "\n".join(lines)
     )
 
 

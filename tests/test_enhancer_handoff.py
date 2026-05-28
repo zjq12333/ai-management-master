@@ -100,9 +100,10 @@ class EnhancerHandoffTests(unittest.TestCase):
             self.assertIn("先检查 handoff 逻辑", content)
             self.assertIn("我会先看当前状态", content)
             self.assertIn(str(handoff_path), result["prompt"])
-            self.assertIn("## Handoff Summary", result["prompt"])
-            self.assertIn("Current objective:", result["prompt"])
-            self.assertIn("Execute the Next action cue below", result["prompt"])
+            self.assertIn("Objective:", result["prompt"])
+            self.assertIn("Next action cue:", result["prompt"])
+            self.assertNotIn("## Handoff Summary", result["prompt"])
+            self.assertLessEqual(len(result["prompt"]), 1800)
 
     def test_create_handoff_falls_back_to_codex_home_when_workspace_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -271,8 +272,9 @@ class EnhancerHandoffTests(unittest.TestCase):
             self.assertIn("- Next action cue: Infer from current workspace state.", content)
             self.assertNotIn("Embedded Handoff", content)
             self.assertNotIn("Read this handoff file first", prompt)
-            self.assertIn("## Handoff Summary", prompt)
-            self.assertLessEqual(len(prompt), 4600)
+            self.assertIn("Objective: Build the transfer feature.", prompt)
+            self.assertNotIn("## Handoff Summary", prompt)
+            self.assertLessEqual(len(prompt), 1800)
 
 
 if __name__ == "__main__":
