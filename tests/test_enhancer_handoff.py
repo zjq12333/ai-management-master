@@ -100,6 +100,9 @@ class EnhancerHandoffTests(unittest.TestCase):
             self.assertIn("先检查 handoff 逻辑", content)
             self.assertIn("我会先看当前状态", content)
             self.assertIn(str(handoff_path), result["prompt"])
+            self.assertIn("## Embedded Handoff", result["prompt"])
+            self.assertIn("Current objective: 测试移交", result["prompt"])
+            self.assertIn("不要回复“我会读取”或“我将继续”", result["prompt"])
 
     def test_create_handoff_falls_back_to_codex_home_when_workspace_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:

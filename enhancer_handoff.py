@@ -15,6 +15,7 @@ import repair_codex_desktop_history as history_repair
 MAX_RECENT_MESSAGES = 8
 MAX_MESSAGE_CHARS = 1200
 MAX_GIT_STATUS_LINES = 30
+MAX_EMBEDDED_HANDOFF_CHARS = 20_000
 
 
 @dataclass
@@ -311,11 +312,26 @@ def _render_handoff(
     return "\n".join(lines)
 
 
-def _build_takeover_prompt(handoff_path: Path) -> str:
+def _build_takeover_prompt(handoff_path: Path, handoff_content: str) -> str:
+    embedded = handoff_content.strip()
+    truncated = len(embedded) > MAX_EMBEDDED_HANDOFF_CHARS
+    if truncated:
+        embedded = embedded[:MAX_EMBEDDED_HANDOFF_CHARS].rstrip()
     return (
         "继续同一任务，不要从零重新分析。\n"
-        f"先读取这个 handoff 文件：{handoff_path}\n"
-        "仅在 handoff 不足以支撑下一步时，再补读必要文件或最新本地状态。"
+        "下面已经内联了 handoff 内容；优先直接依据它继续执行。\n"
+        f"handoff 文件路径：{handoff_path}\n"
+        "不要回复“我会读取”或“我将继续”；请立刻执行 handoff 里的 Next action cue。\n"
+        "仅在内联 handoff 不足以支撑下一步时，再补读必要文件或最新本地状态。\n"
+        "\n"
+        "## Embedded Handoff\n"
+        "\n"
+        f"{embedded}"
+        + (
+            "\n\n[Embedded handoff truncated. Read the handoff file path above if more context is needed.]"
+            if truncated
+            else ""
+        )
     )
 
 
@@ -338,7 +354,7 @@ def create_handoff(codex_home: Path, thread_id: str, title_hint: str = "") -> di
     handoff_content = _render_handoff(record, handoff_path, recent_messages, local_snapshot)
     handoff_path.write_text(handoff_content, encoding="utf-8")
 
-    prompt = _build_takeover_prompt(handoff_path)
+    prompt = _build_takeover_prompt(handoff_path, handoff_content)
     return {
         "ok": True,
         "status": "handoff_ready",
