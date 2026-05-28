@@ -5,3 +5,28 @@ repair-*.log
 
 *.zip
 
+# Local runtime state and generated assistant context.
+.ai-strategist/
+.codegraph/
+.superpowers/
+reports/
+
+# Python/test caches.
+.pytest_cache/
+
+# Node/Tauri dependencies and build outputs.
+node_modules/
+ai-strategist-desktop/node_modules/
+ai-strategist-desktop/dist/
+ai-strategist-desktop/src-tauri/target/
+ai-strategist-desktop/src-tauri/gen/
+*.tsbuildinfo
+
+# Local verification artifacts and vendored upstream checkouts.
+artifacts/
+!artifacts/.gitkeep
+artifacts/upstream/
+third_party/
+!third_party/.gitkeep
+third_party/codex-plus-plus/target/
+
