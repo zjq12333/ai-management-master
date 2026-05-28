@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import sqlite3
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ import repair_codex_desktop_history as history_repair
 
 MAX_RECENT_MESSAGES = 8
 MAX_MESSAGE_CHARS = 1200
+MAX_GIT_STATUS_LINES = 30
 
 
 @dataclass
@@ -156,7 +158,58 @@ def _latest_message(recent_messages: list[dict[str, str]], role: str) -> str:
     return ""
 
 
-def _render_handoff(record: ThreadRecord, handoff_path: Path, recent_messages: list[dict[str, str]]) -> str:
+def _run_git(workspace: Path, args: list[str]) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.rstrip()
+
+
+def _collect_local_snapshot(cwd: str) -> dict[str, object]:
+    if not cwd:
+        return {"workspace_exists": False, "git_available": False, "branch": "", "status": []}
+
+    workspace = Path(cwd)
+    try:
+        if not workspace.exists() or not workspace.is_dir():
+            return {"workspace_exists": False, "git_available": False, "branch": "", "status": []}
+    except OSError:
+        return {"workspace_exists": False, "git_available": False, "branch": "", "status": []}
+
+    snapshot: dict[str, object] = {
+        "workspace_exists": True,
+        "git_available": False,
+        "branch": "",
+        "status": [],
+    }
+    try:
+        inside = _run_git(workspace, ["rev-parse", "--is-inside-work-tree"])
+        if inside != "true":
+            return snapshot
+        branch = _run_git(workspace, ["branch", "--show-current"]) or _run_git(workspace, ["rev-parse", "--short", "HEAD"])
+        status = _run_git(workspace, ["status", "--short"])
+    except (OSError, subprocess.SubprocessError):
+        return snapshot
+
+    snapshot["git_available"] = True
+    snapshot["branch"] = branch or "(detached or unknown)"
+    snapshot["status"] = status.splitlines()[:MAX_GIT_STATUS_LINES] if status else []
+    return snapshot
+
+
+def _render_handoff(
+    record: ThreadRecord,
+    handoff_path: Path,
+    recent_messages: list[dict[str, str]],
+    local_snapshot: dict[str, object],
+) -> str:
     created_at = datetime.now().astimezone().isoformat()
     objective = _preview_text(record.title or record.first_user_message or record.thread_id, 200)
     last_user_request = _preview_text(_latest_message(recent_messages, "user") or record.first_user_message, 240)
@@ -190,6 +243,27 @@ def _render_handoff(record: ThreadRecord, handoff_path: Path, recent_messages: l
             f"- Last user request: {last_user_request or '(not captured)'}",
             f"- Last assistant response: {last_assistant_response or '(not captured)'}",
             f"- Active workspace: {record.cwd or '(unknown)'}",
+            "",
+            "## Local Snapshot",
+            "",
+            f"- Workspace exists: {'yes' if local_snapshot.get('workspace_exists') else 'no'}",
+            f"- Git branch: {local_snapshot.get('branch') or '(not a git workspace)'}",
+            "- Git status:",
+        ]
+    )
+
+    status_lines = local_snapshot.get("status")
+    if isinstance(status_lines, list) and status_lines:
+        lines.extend([f"  - `{line}`" for line in status_lines])
+        if len(status_lines) >= MAX_GIT_STATUS_LINES:
+            lines.append("  - ... truncated; inspect git status locally for the full list.")
+    elif local_snapshot.get("git_available"):
+        lines.append("  - clean")
+    else:
+        lines.append("  - unavailable")
+
+    lines.extend(
+        [
             "",
             "## Progress Ledger",
             "",
@@ -253,6 +327,7 @@ def create_handoff(codex_home: Path, thread_id: str, title_hint: str = "") -> di
 
     record = _load_thread_record(codex_home, normalized_thread_id)
     recent_messages = _collect_recent_messages(record.rollout_path)
+    local_snapshot = _collect_local_snapshot(record.cwd)
 
     handoff_root = _handoff_root(codex_home, record.cwd)
     handoff_root.mkdir(parents=True, exist_ok=True)
@@ -260,7 +335,7 @@ def create_handoff(codex_home: Path, thread_id: str, title_hint: str = "") -> di
     name_seed = title_hint or record.title or record.first_user_message or record.thread_id
     handoff_path = handoff_root / f"{stamp}-{_safe_slug(_preview_text(name_seed, 48), record.thread_id)}-handoff.md"
 
-    handoff_content = _render_handoff(record, handoff_path, recent_messages)
+    handoff_content = _render_handoff(record, handoff_path, recent_messages, local_snapshot)
     handoff_path.write_text(handoff_content, encoding="utf-8")
 
     prompt = _build_takeover_prompt(handoff_path)

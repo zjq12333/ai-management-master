@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -90,6 +91,7 @@ class EnhancerHandoffTests(unittest.TestCase):
             self.assertIn("- Current objective: 测试移交", content)
             self.assertIn("- Last user request: 先检查 handoff 逻辑", content)
             self.assertIn("- Last assistant response: 我会先看当前状态", content)
+            self.assertIn("## Local Snapshot", content)
             self.assertIn("## Progress Ledger", content)
             self.assertIn("## Verification", content)
             self.assertIn("## Watchouts", content)
@@ -131,6 +133,57 @@ class EnhancerHandoffTests(unittest.TestCase):
             handoff_path = Path(result["handoff_path"])
             self.assertTrue(handoff_path.exists())
             self.assertEqual(handoff_path.parent, codex_home / "codexmate" / "handoffs")
+
+    def test_create_handoff_includes_git_snapshot_when_workspace_is_git_repo(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_home = root / ".codex"
+            codex_home.mkdir(parents=True, exist_ok=True)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            subprocess.run(["git", "init", "-b", "handoff-test"], cwd=workspace, check=True, capture_output=True)
+            (workspace / "tracked.txt").write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.txt"], cwd=workspace, check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "seed"],
+                cwd=workspace,
+                check=True,
+                capture_output=True,
+            )
+            (workspace / "tracked.txt").write_text("after\n", encoding="utf-8")
+            (workspace / "new.txt").write_text("new\n", encoding="utf-8")
+
+            db_path = codex_home / "state_5.sqlite"
+            con = sqlite3.connect(db_path)
+            con.execute(
+                """
+                create table threads (
+                    id text primary key,
+                    cwd text,
+                    rollout_path text,
+                    title text,
+                    first_user_message text,
+                    updated_at integer
+                )
+                """
+            )
+            con.execute(
+                """
+                insert into threads (id, cwd, rollout_path, title, first_user_message, updated_at)
+                values (?, ?, ?, ?, ?, ?)
+                """,
+                ("thread-3", str(workspace), "", "Git 快照", "继续当前改动", 1),
+            )
+            con.commit()
+            con.close()
+
+            result = enhancer_handoff.create_handoff(codex_home, "thread-3")
+
+            content = Path(result["handoff_path"]).read_text(encoding="utf-8")
+            self.assertIn("## Local Snapshot", content)
+            self.assertIn("- Git branch: handoff-test", content)
+            self.assertIn(" M tracked.txt", content)
+            self.assertIn("?? new.txt", content)
 
 
 if __name__ == "__main__":
