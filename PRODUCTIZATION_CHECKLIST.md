@@ -1,0 +1,181 @@
+﻿# Productization Checklist
+
+## Purpose
+
+This checklist turns AI Strategist from a development-machine-only tool into a **download-and-run desktop product**.
+
+The guiding rule is simple:
+
+> Do not depend on the user machine being lucky.
+
+That means:
+
+- do not depend on user PATH being correct
+- do not depend on `WindowsApps` Codex entrypoints
+- do not depend on user-preinstalled Python / Git / helper tools
+- do not treat current developer-machine success as release readiness
+
+## 1. Must Bundle
+
+These items are required for the main workflow. If missing, the product is not considered generally deliverable.
+
+### 1.1 Runtime Resolution
+
+- [ ] Build a single internal runtime resolver for `codex`, Python, and helper binaries.
+- [ ] Stop calling bare commands like `codex`, `python`, `git`, `codex-threadripper` in mainline logic.
+- [ ] Resolve binaries in this order:
+  1. bundled application runtime
+  2. product-managed local runtime directory
+  3. explicit fallback with warning
+- [ ] Never rely on `WindowsApps` as the main product execution path.
+
+### 1.2 Codex Runtime
+
+- [ ] Bundle or product-manage a stable runnable Codex CLI path.
+- [ ] Ensure launch/bridge logic does not depend on shell alias resolution.
+- [ ] Ensure all internal wrappers use product-controlled paths.
+
+### 1.3 Python Bridge Runtime
+
+- [ ] Bundle a Python runtime or ship the bridge in a form that removes Python as a user prerequisite.
+- [ ] Ensure `prelaunch_bridge.py`, `prelaunch_manager.py`, and `repair_codex_desktop_history.py` are callable through product-owned runtime paths.
+- [ ] Remove any assumption that system Python exists.
+
+### 1.4 Mainline Helper Tools
+
+- [ ] Decide whether `codex-threadripper` is required or optional.
+- [ ] If required: bundle it.
+- [ ] If optional: implement graceful downgrade and remove hard dependency from the mainline repair promise.
+
+## 2. Can Degrade
+
+These features may be unavailable without making the product unusable, but the UI and diagnostics must explicitly reflect that.
+
+### 2.1 Optional Tooling
+
+- [ ] `git`-related flows may degrade if Git is unavailable.
+- [ ] patch/diff developer workflows may degrade if internal patch runner is unavailable.
+- [ ] non-core MCP / Skills / maintenance modules may load lazily or show unavailable state.
+
+### 2.2 UI Rules for Degraded Features
+
+- [ ] Never crash or white-screen when optional tooling is unavailable.
+- [ ] Show a clear unavailable/degraded badge in the relevant module.
+- [ ] Keep `启动与修复` usable even if optional modules are broken.
+
+## 3. First-Run Repair
+
+These checks should happen automatically on first launch or through a guided “Initialize / Repair Environment” flow.
+
+### 3.1 Directory Preparation
+
+- [ ] Create product-managed runtime directory.
+- [ ] Create logs / reports / diagnostics directory.
+- [ ] Create backup directory for runtime-managed files.
+
+### 3.2 Environment Checks
+
+- [ ] Detect Codex Desktop install path.
+- [ ] Detect product-managed Codex CLI path.
+- [ ] Detect bridge runtime availability.
+- [ ] Detect access to `.codex`, `config.toml`, `auth.json`, `state_5.sqlite`.
+- [ ] Detect whether the product can write report and backup files.
+
+### 3.3 Auto Repair Actions
+
+- [ ] If a stable Codex CLI path is missing, provision or repair it automatically.
+- [ ] If runtime wrapper paths are stale, rebuild them automatically.
+- [ ] If required directories are missing, create them automatically.
+- [ ] If old shortcuts / old product names remain, clean them automatically where safe.
+
+### 3.4 User Experience
+
+- [ ] Replace raw internal errors with guided first-run repair outcomes.
+- [ ] Show only three outcomes:
+  - ready
+  - repaired automatically
+  - blocked with explicit next action
+
+## 4. Release Acceptance
+
+These gates must pass before claiming the product is broadly downloadable.
+
+### 4.1 Clean Machine Acceptance
+
+- [ ] Install on a clean Windows machine without preinstalled Python / Node / Rust / Git.
+- [ ] Open `AI Strategist.exe` successfully.
+- [ ] Enter `启动与修复` successfully.
+- [ ] Official launch visible and runnable.
+- [ ] API launch visible, provider input visible, and runnable.
+- [ ] Hybrid launch visible, provider input visible, and runnable.
+- [ ] Repair visible and runnable.
+
+### 4.2 Runtime Independence Acceptance
+
+- [ ] Mainline product workflows do not require user PATH edits.
+- [ ] Mainline product workflows do not require `WindowsApps` executable access.
+- [ ] Mainline product workflows do not require manual dependency installation.
+
+### 4.3 Diagnostics Acceptance
+
+- [ ] Export a stable diagnostics bundle for failures.
+- [ ] Diagnostics include:
+  - app version
+  - runtime resolution results
+  - Codex path actually used
+  - Python bridge runtime path actually used
+  - helper tool availability
+  - permission check results
+  - latest failure summary
+
+### 4.4 Safety Acceptance
+
+- [ ] Repair and launch mutation paths still enforce running-process guards.
+- [ ] Backup paths are always created before mutation.
+- [ ] External file operations remain scoped.
+
+## 5. Current Known Gaps
+
+These are already confirmed in the current repo/environment and must not be ignored.
+
+- [ ] default `WindowsApps` `codex.exe` path is not a reliable execution target
+- [ ] current `apply_patch` chain still depends on blocked Codex entrypoint
+- [ ] `git` is not currently available in the active shell environment
+- [ ] `codex-threadripper` is not currently available in the active shell environment
+- [ ] the installer/runtime packaging strategy is not yet product-complete
+
+## 6. Execution Order
+
+Recommended implementation order:
+
+1. runtime resolver
+2. bundled / managed Codex CLI path
+3. bundled / managed Python bridge runtime
+4. required-vs-optional helper classification
+5. first-run self-check screen
+6. diagnostics bundle export
+7. clean-machine acceptance run
+
+## 7. Current Owner Files
+
+Primary files involved in this checklist:
+
+- `ai-strategist-desktop/src/components/login-repair/login-repair-page.tsx`
+- `ai-strategist-desktop/src-tauri/src/commands/prelaunch.rs`
+- `prelaunch_bridge.py`
+- `prelaunch_manager.py`
+- `repair_codex_desktop_history.py`
+- `README.md`
+- `HANDOFF.md`
+- `EXECUTION_PLAN.md`
+- `V0_1_RELEASE_CHECKLIST.md`
+
+## 8. Definition of Done
+
+AI Strategist can be considered productized for this workflow only when:
+
+- a clean-user install can open and use the main workflow
+- API / Hybrid launch no longer depends on stale local config luck
+- the product controls its runtime paths
+- missing optional tools degrade gracefully
+- users do not need to understand shell PATH, WindowsApps, or developer environment setup to use the product
