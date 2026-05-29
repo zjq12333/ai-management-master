@@ -492,7 +492,7 @@ def threadripper_command() -> str | None:
     resolved = os.environ.get("AI_STRATEGIST_THREADRIPPER")
     if resolved and Path(resolved).exists():
         return resolved
-    return shutil.which("codex-threadripper")
+    return None
 
 
 def subprocess_window_options() -> dict[str, object]:

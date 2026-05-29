@@ -23,6 +23,7 @@ These items are required for the main workflow. If missing, the product is not c
 
 - [x] Build a single internal runtime resolver for `codex`, Python, and helper binaries.
 - [ ] Stop calling bare commands like `codex`, `python`, `git`, `codex-threadripper` in mainline logic.
+  - `codex-threadripper` no longer falls back to user PATH from prelaunch status checks; it only runs when product-injected through `AI_STRATEGIST_THREADRIPPER`.
 - [ ] Resolve binaries in this order:
   1. bundled application runtime
   2. product-managed local runtime directory
@@ -60,9 +61,15 @@ Remaining caveat:
 
 ### 1.4 Mainline Helper Tools
 
-- [ ] Decide whether `codex-threadripper` is required or optional.
+- [x] Decide whether `codex-threadripper` is required or optional.
 - [ ] If required: bundle it.
-- [ ] If optional: implement graceful downgrade and remove hard dependency from the mainline repair promise.
+- [x] If optional: implement graceful downgrade and remove hard dependency from the mainline repair promise.
+
+Evidence:
+
+- `threadripper_command()` now returns a helper only when `AI_STRATEGIST_THREADRIPPER` points to an existing file.
+- If unavailable, `run_threadripper_status()` returns `None` and prelaunch evidence reports `threadripper_available=False` without blocking launch.
+- Regression coverage: `test_threadripper_command_ignores_missing_environment_path_without_path_fallback`.
 
 ## 2. Can Degrade
 

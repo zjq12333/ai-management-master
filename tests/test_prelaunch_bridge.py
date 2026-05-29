@@ -55,13 +55,13 @@ class PrelaunchBridgeTests(unittest.TestCase):
             ), mock.patch("prelaunch_manager.shutil.which", return_value="PATH_SHOULD_NOT_WIN"):
                 self.assertEqual(prelaunch_manager.threadripper_command(), str(helper))
 
-    def test_threadripper_command_ignores_missing_environment_path_and_falls_back_to_path(self):
+    def test_threadripper_command_ignores_missing_environment_path_without_path_fallback(self):
         with mock.patch.dict(
             "os.environ",
             {"AI_STRATEGIST_THREADRIPPER": "C:/missing/codex-threadripper.exe"},
             clear=False,
         ), mock.patch("prelaunch_manager.shutil.which", return_value="codex-threadripper"):
-            self.assertEqual(prelaunch_manager.threadripper_command(), "codex-threadripper")
+            self.assertIsNone(prelaunch_manager.threadripper_command())
 
     def test_enhancer_enabled_returns_true_when_one_click_handoff_is_enabled(self):
         with tempfile.TemporaryDirectory() as temp_dir:
