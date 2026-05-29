@@ -618,6 +618,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
             payload = prelaunch_manager.launch_codex_desktop_with_retry(
                 ["--remote-debugging-port=9229"],
                 attempts=3,
+                allow_takeover=True,
             )
 
         self.assertTrue(payload["ok"])
@@ -627,6 +628,35 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertEqual(payload["previous_attempts"][0]["attempt"], 1)
         self.assertEqual(launch_once.call_count, 2)
         takeover.assert_called_once()
+
+    def test_launch_codex_desktop_with_retry_requires_explicit_takeover(self):
+        with mock.patch.object(
+            prelaunch_manager,
+            "_launch_codex_desktop_with_args_once",
+            return_value={
+                "ok": False,
+                "method": "product_resolved_packaged_activation",
+                "debug_port": 9229,
+                "error": "Codex Desktop launched but CDP did not come up on port 9229.",
+            },
+        ) as launch_once, mock.patch.object(
+            prelaunch_manager,
+            "cleanup_failed_enhanced_launch",
+            return_value={"ok": True, "launcher": {"ok": True}, "desktop": {"ok": True}},
+        ), mock.patch.object(
+            prelaunch_manager,
+            "prepare_codex_takeover",
+        ) as takeover:
+            payload = prelaunch_manager.launch_codex_desktop_with_retry(
+                ["--remote-debugging-port=9229"],
+                attempts=3,
+            )
+
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["method"], "retry_takeover_not_allowed")
+        self.assertEqual(payload["attempts"], 1)
+        self.assertEqual(launch_once.call_count, 1)
+        takeover.assert_not_called()
 
     def test_launch_codex_desktop_with_retry_stops_on_non_retryable_error(self):
         with mock.patch.object(

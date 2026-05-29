@@ -1263,6 +1263,7 @@ def launch_codex_desktop_with_retry(
     *,
     attempts: int = 3,
     retry_cooldown_seconds: float = 1.5,
+    allow_takeover: bool = False,
 ) -> dict[str, object]:
     return desktop_launcher.launch_codex_desktop_with_retry(
         extra_args,
@@ -1284,6 +1285,7 @@ def launch_codex_desktop_with_retry(
         retry_cooldown_seconds=retry_cooldown_seconds,
         current_runtime_pid=os.getpid() if os.name == "nt" else None,
         cdp_not_ready_error_fragment=CDP_NOT_READY_ERROR_FRAGMENT,
+        allow_takeover=allow_takeover,
     )
 
 

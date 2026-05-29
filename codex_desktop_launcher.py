@@ -278,6 +278,7 @@ def launch_codex_desktop_with_retry(
     retry_cooldown_seconds: float = 1.5,
     current_runtime_pid: int | None = None,
     cdp_not_ready_error_fragment: str = "CDP did not come up",
+    allow_takeover: bool = False,
 ) -> dict[str, object]:
     normalized_args, debug_port = normalize_remote_debugging_args(extra_args)
     max_attempts = max(1, int(attempts))
@@ -299,6 +300,17 @@ def launch_codex_desktop_with_retry(
             }
 
         if attempt > 1:
+            if not allow_takeover:
+                return {
+                    "ok": False,
+                    "method": "retry_takeover_not_allowed",
+                    "attempt": attempt,
+                    "attempts": attempt - 1,
+                    "args": normalized_args,
+                    "debug_port": debug_port,
+                    "error": "Codex Desktop did not become ready; explicit repair is required before takeover.",
+                    "previous_attempts": previous_attempts,
+                }
             takeover = prepare_takeover(max(5.0, retry_cooldown_seconds + 3.5), retry_cooldown_seconds)
             if not bool(takeover.get("ok")):
                 return {
