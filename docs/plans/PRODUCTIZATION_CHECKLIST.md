@@ -57,6 +57,7 @@ Evidence:
 - `Verify-AI-Strategist.ps1` verifies the bundled bridge resource and safe smoke commands.
 - `Test-AI-StrategistInstall.ps1` passed against a release NSIS install on the developer machine.
 - Latest developer-machine NSIS smoke: commit `237823d`, installer `AI Strategist_1.0.0_x64-setup.exe`, SHA256 `949CFEE588397F2B1C97E48432BC111999612E57816371FF4E5F78A99288094F`; installed bridge `status` reports `threadripper_available=false`, and installed `AI-Strategist.exe` starts and closes successfully.
+- Latest safe UI NSIS smoke: commit `29adee0`, installer `AI Strategist_1.0.0_x64-setup.exe`, SHA256 `3ABA0940CB9466A65433D805D5A9679FA4D8488B6101881C81EC1C359D565658`; installed bridge `status` and `runtime-status` passed, installed `AI-Strategist.exe` opened and closed successfully, and no real `launch` / `stop-runtime` / `repair` command was executed.
 
 Remaining caveat:
 
