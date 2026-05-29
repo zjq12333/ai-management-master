@@ -162,6 +162,8 @@ export function LoginRepairPage() {
   const [pendingRuntimeAction, setPendingRuntimeAction] = useState<PendingRuntimeAction | null>(null);
   const [stopRuntimeError, setStopRuntimeError] = useState<string | null>(null);
   const [runtimeSafetyNotice, setRuntimeSafetyNotice] = useState<string | null>(null);
+  const [codexRunning, setCodexRunning] = useState<boolean | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [activeProviderMode, setActiveProviderMode] = useState<PrelaunchMode | null>(null);
   const [providerDraft, setProviderDraft] = useState<ProviderDraft>(defaultProviderDraft);
   const [providerError, setProviderError] = useState<string | null>(null);
@@ -224,6 +226,7 @@ export function LoginRepairPage() {
 
   const checkRuntimeReady = async (action: PendingRuntimeAction) => {
     const runtime = await api.prelaunchRuntimeStatus();
+    setCodexRunning(runtime.codex_running);
     if (runtime.codex_running) {
       const processLabel = runtime.processes
         .map((process) => [process.image, process.pid == null ? null : `PID ${process.pid}`].filter(Boolean).join(" "))
@@ -232,7 +235,7 @@ export function LoginRepairPage() {
         .join("、");
       if (action.type === "launch") {
         setRuntimeSafetyNotice(
-          `检测到 Codex 已在运行：${processLabel || "已有 Codex 进程"}。普通启动不会关闭、聚焦或重复拉起 Codex；如需强制重启，请使用“修复/重启 Codex”。`,
+          `检测到 ${processLabel || "已有 Codex 进程"}。如果 Codex 窗口能正常使用，不需要再操作；如果卡住或打不开，请点“重启并打开 Codex”。`,
         );
         return false;
       }
@@ -334,6 +337,14 @@ export function LoginRepairPage() {
     }
   };
 
+  const handlePrimaryAction = async () => {
+    if (codexRunning) {
+      await repairWithRuntimeCheck();
+      return;
+    }
+    await launchEnhancedWithRuntimeCheck();
+  };
+
   const submitProviderLaunch = () => {
     if (!activeProviderMode) return;
     void launchWithRuntimeCheck(activeProviderMode);
@@ -350,23 +361,22 @@ export function LoginRepairPage() {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 lg:grid-cols-3">
-        {launchModes.map(({ mode, title, desc }) => {
-          return (
-            <ActionCard
-              key={mode}
-              title={title}
-              desc={desc}
-              icon={Rocket}
-              busy={launchMutation.isPending && runningMode === mode}
-              disabled={providerDisabled}
-              actionLabel={mode === "official" ? "直接启动" : "填写信息"}
-              busyLabel="启动中..."
-              onClick={() => handleLaunchClick(mode)}
-            />
-          );
-        })}
-      </div>
+      <BentoCard>
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-lg font-semibold">
+              <Rocket className="h-5 w-5 text-primary" />
+              Codex 启动器
+            </div>
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              普通用户只需要点这里。若 Codex 没开，会打开 Codex；若检测到后台残留，会走“重启并打开”流程。
+            </p>
+          </div>
+          <Button className="min-w-44" disabled={providerDisabled} onClick={() => void handlePrimaryAction()}>
+            {repairMutation.isPending || launchMutation.isPending ? "处理中..." : codexRunning ? "重启并打开 Codex" : "启动 Codex"}
+          </Button>
+        </div>
+      </BentoCard>
 
       {providerError && !activeProviderMode ? (
         <BentoCard>
@@ -377,13 +387,45 @@ export function LoginRepairPage() {
       {runtimeSafetyNotice ? (
         <BentoCard>
           <div className="space-y-2 text-sm">
-            <div className="font-semibold text-amber-700">安全启动已拦截</div>
+            <div className="font-semibold text-amber-700">Codex 已在运行</div>
             <p className="leading-6 text-muted-foreground">{runtimeSafetyNotice}</p>
           </div>
         </BentoCard>
       ) : null}
 
-      {activeProviderMode ? (
+      <BentoCard>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-sm font-semibold">高级选项</div>
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">只有需要第三方 API、混合登录或恢复历史时才打开。</p>
+          </div>
+          <Button variant="outline" onClick={() => setAdvancedOpen((open) => !open)}>
+            {advancedOpen ? "收起高级选项" : "显示高级选项"}
+          </Button>
+        </div>
+      </BentoCard>
+
+      {advancedOpen ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {launchModes
+            .filter(({ mode }) => mode !== "official")
+            .map(({ mode, title, desc }) => (
+              <ActionCard
+                key={mode}
+                title={title}
+                desc={desc}
+                icon={Rocket}
+                busy={launchMutation.isPending && runningMode === mode}
+                disabled={providerDisabled}
+                actionLabel="填写信息"
+                busyLabel="启动中..."
+                onClick={() => handleLaunchClick(mode)}
+              />
+            ))}
+        </div>
+      ) : null}
+
+      {advancedOpen && activeProviderMode ? (
         <BentoCard>
           <div className="space-y-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -471,17 +513,20 @@ export function LoginRepairPage() {
         </BentoCard>
       ) : null}
 
-      <ActionCard
-        title="修复/重启 Codex"
-        desc="显式修复入口。继续前会要求确认关闭当前 Codex，然后修复历史、workspace 和 session index。"
-        icon={Wrench}
-        busy={repairMutation.isPending}
-        disabled={providerDisabled}
-        actionLabel="修复/重启 Codex"
-        busyLabel="修复/重启中..."
-        onClick={() => void repairWithRuntimeCheck()}
-      />
+      {advancedOpen ? (
+        <ActionCard
+          title="历史恢复"
+          desc="高级修复入口。会先要求确认关闭当前 Codex，然后修复历史、workspace 和 session index。"
+          icon={Wrench}
+          busy={repairMutation.isPending}
+          disabled={providerDisabled}
+          actionLabel="修复历史"
+          busyLabel="修复中..."
+          onClick={() => void repairWithRuntimeCheck()}
+        />
+      ) : null}
 
+      {advancedOpen ? (
       <BentoCard>
         <div className="space-y-4">
           <div>
@@ -552,6 +597,7 @@ export function LoginRepairPage() {
           </div>
         </div>
       </BentoCard>
+      ) : null}
 
       {statusQuery.isError ? <ErrorCard title="启动前状态读取失败" error={statusQuery.error} /> : null}
       {launchMutation.isError ? <ErrorCard title="启动流程失败" error={launchMutation.error} /> : null}
