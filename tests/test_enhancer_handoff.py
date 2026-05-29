@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import enhancer_handoff
 
@@ -198,6 +199,46 @@ class EnhancerHandoffTests(unittest.TestCase):
             self.assertIn("- Git branch: handoff-test", content)
             self.assertIn(" M tracked.txt", content)
             self.assertIn("?? new.txt", content)
+
+    def test_create_handoff_gracefully_degrades_when_git_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_home = root / ".codex"
+            codex_home.mkdir(parents=True, exist_ok=True)
+            workspace = root / "workspace"
+            workspace.mkdir()
+
+            db_path = codex_home / "state_5.sqlite"
+            con = sqlite3.connect(db_path)
+            con.execute(
+                """
+                create table threads (
+                    id text primary key,
+                    cwd text,
+                    rollout_path text,
+                    title text,
+                    first_user_message text,
+                    updated_at integer
+                )
+                """
+            )
+            con.execute(
+                """
+                insert into threads (id, cwd, rollout_path, title, first_user_message, updated_at)
+                values (?, ?, ?, ?, ?, ?)
+                """,
+                ("thread-no-git", str(workspace), "", "No Git", "继续当前改动", 1),
+            )
+            con.commit()
+            con.close()
+
+            with mock.patch("enhancer_handoff.shutil.which", return_value=None):
+                result = enhancer_handoff.create_handoff(codex_home, "thread-no-git")
+
+            content = Path(result["handoff_path"]).read_text(encoding="utf-8")
+            self.assertIn("## Local Snapshot", content)
+            self.assertIn("- Git branch: (not a git workspace)", content)
+            self.assertIn("  - unavailable", content)
 
     def test_create_handoff_filters_resume_meta_messages(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import shutil
 import sqlite3
 import subprocess
 from dataclasses import dataclass
@@ -244,8 +245,11 @@ def _derive_next_action_from_evidence(evidence: str) -> str:
 
 
 def _run_git(workspace: Path, args: list[str]) -> str:
+    git = shutil.which("git")
+    if not git:
+        return ""
     result = subprocess.run(
-        ["git", *args],
+        [git, *args],
         cwd=workspace,
         capture_output=True,
         text=True,

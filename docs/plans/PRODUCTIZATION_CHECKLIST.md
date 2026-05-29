@@ -25,6 +25,7 @@ These items are required for the main workflow. If missing, the product is not c
 - [ ] Stop calling bare commands like `codex`, `python`, `git`, `codex-threadripper` in mainline logic.
   - `codex-threadripper` no longer falls back to user PATH from prelaunch status checks; it only runs when product-injected through `AI_STRATEGIST_THREADRIPPER`.
   - Windows system helpers in the prelaunch and shutdown paths (`powershell.exe`, `reg.exe`, `taskkill.exe`) now resolve from `%SystemRoot%\System32` before falling back to command names.
+  - One-click handoff Git context now resolves `git` before use and degrades to an unavailable local snapshot instead of making Git a hard dependency.
 - [ ] Resolve binaries in this order:
   1. bundled application runtime
   2. product-managed local runtime directory
