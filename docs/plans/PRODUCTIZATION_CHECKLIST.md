@@ -21,7 +21,7 @@ These items are required for the main workflow. If missing, the product is not c
 
 ### 1.1 Runtime Resolution
 
-- [ ] Build a single internal runtime resolver for `codex`, Python, and helper binaries.
+- [x] Build a single internal runtime resolver for `codex`, Python, and helper binaries.
 - [ ] Stop calling bare commands like `codex`, `python`, `git`, `codex-threadripper` in mainline logic.
 - [ ] Resolve binaries in this order:
   1. bundled application runtime
@@ -38,7 +38,7 @@ These items are required for the main workflow. If missing, the product is not c
 ### 1.3 Python Bridge Runtime
 
 - [ ] Bundle a Python runtime or ship the bridge in a form that removes Python as a user prerequisite.
-- [ ] Ensure `prelaunch_bridge.py`, `prelaunch_manager.py`, and `repair_codex_desktop_history.py` are callable through product-owned runtime paths.
+- [x] Ensure `prelaunch_bridge.py`, `prelaunch_manager.py`, and `repair_codex_desktop_history.py` are callable through product-owned script resource paths.
 - [ ] Remove any assumption that system Python exists.
 
 ### 1.4 Mainline Helper Tools

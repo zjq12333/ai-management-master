@@ -10,7 +10,7 @@ The current project still has scattered runtime assumptions:
 
 - some logic relies on bare command names
 - some logic relies on `WindowsApps`-backed executables
-- Python bridge execution is resolved inside a single command module instead of through a shared platform layer
+- Python bridge script resources are now bundled, but the Python executable itself still needs a product-owned distribution path
 - helper-tool discovery is not classified into required vs optional
 
 ## Phase 1 Scope
@@ -29,9 +29,10 @@ Deliverables:
 
 ### Python bridge runtime
 
-1. product-managed local runtime under user profile / app data
-2. product-managed bundled runtime path
-3. fallback `python`
+1. explicit `AI_STRATEGIST_PYTHON` override for diagnostics and managed installs
+2. bundled runtime path beside the app executable or under Tauri resources
+3. product-managed local runtime under user profile / app data
+4. fallback `python`
 
 ### Codex CLI runtime
 
@@ -49,7 +50,7 @@ Deliverables:
 
 ## Target Module
 
-Create:
+Created:
 
 - `ai-strategist-desktop/src-tauri/src/platform/runtime_resolver.rs`
 
@@ -65,6 +66,13 @@ Responsibilities:
 The first migration target is:
 
 - `ai-strategist-desktop/src-tauri/src/commands/prelaunch.rs`
+
+## Current Status
+
+- The shared resolver exists and is used by the prelaunch bridge command.
+- `prelaunch_bridge.py` and its local Python modules are included in Tauri `bundle.resources`.
+- Runtime lookup now supports explicit environment override, common Tauri bundled-resource layouts, product-managed local directories, and PATH fallback.
+- Still pending: ship an actual Python runtime or transform the bridge into a self-contained executable so clean machines do not need system Python.
 
 Reason:
 

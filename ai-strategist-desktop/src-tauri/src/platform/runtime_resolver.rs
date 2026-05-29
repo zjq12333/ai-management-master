@@ -109,9 +109,41 @@ where
     None
 }
 
+fn bundled_python_candidates() -> Vec<PathBuf> {
+    let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(PathBuf::from))
+    else {
+        return Vec::new();
+    };
+
+    vec![
+        exe_dir.join("python").join("python.exe"),
+        exe_dir.join("resources").join("python").join("python.exe"),
+        exe_dir.join("_up_").join("python").join("python.exe"),
+        exe_dir
+            .join("..")
+            .join("Resources")
+            .join("python")
+            .join("python.exe"),
+    ]
+}
+
 pub fn resolve_python_runtime() -> ResolvedRuntime {
     env_runtime_path("AI_STRATEGIST_PYTHON", ResolvedRuntimeSource::ManagedLocal)
         .and_then(validated_python_runtime)
+        .or_else(|| {
+            bundled_python_candidates().into_iter().find_map(|path| {
+                if path.exists() {
+                    validated_python_runtime(ResolvedRuntime {
+                        path,
+                        source: ResolvedRuntimeSource::ManagedLocal,
+                    })
+                } else {
+                    None
+                }
+            })
+        })
         .or_else(|| find_in_runtime_dirs(|root| {
         let bundled_candidate = root.join("python").join("python.exe");
         if bundled_candidate.exists() {
@@ -368,8 +400,14 @@ fn find_codex_in_uninstall_entries(root: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_on_path, python_runtime_supports_modules, resolve_python_runtime, ResolvedRuntimeSource};
+    use super::{
+        bundled_python_candidates, find_on_path, python_runtime_supports_modules,
+        resolve_python_runtime, ResolvedRuntimeSource,
+    };
     use std::fs;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn python_runtime_resolution_returns_some_path() {
@@ -393,6 +431,7 @@ mod tests {
 
     #[test]
     fn invalid_explicit_python_runtime_does_not_win_resolution() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
         let original = std::env::var_os("AI_STRATEGIST_PYTHON");
         std::env::set_var("AI_STRATEGIST_PYTHON", "C:\\invalid\\missing-python.exe");
         let resolved = resolve_python_runtime();
@@ -405,7 +444,23 @@ mod tests {
     }
 
     #[test]
+    fn bundled_python_candidates_cover_tauri_resource_layouts() {
+        let rendered = bundled_python_candidates()
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("python"));
+        assert!(rendered.contains("python.exe"));
+        assert!(rendered.contains("resources"));
+        assert!(rendered.contains("_up_"));
+        assert!(rendered.contains("Resources"));
+    }
+
+    #[test]
     fn path_lookup_can_exclude_windowsapps_entries() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
         let root = std::env::temp_dir().join(format!(
             "ai-strategist-windowsapps-path-test-{}",
             std::process::id()
