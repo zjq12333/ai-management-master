@@ -31,6 +31,14 @@ Useful fast-path options:
 .\Verify-AI-Strategist.ps1 -SkipRust
 ```
 
+After installing a packaged build, run the installed-app smoke check against the install directory:
+
+```powershell
+.\Test-AI-StrategistInstall.ps1 -InstallDir "C:\Program Files\AI Strategist"
+```
+
+For a resource-only smoke check against a staged directory, add `-SkipAppExe`.
+
 ## Archive
 
 - [Historical handoffs](archive/handoffs/): previous project handoff files. These preserve context but should not override the current README or execution plan.

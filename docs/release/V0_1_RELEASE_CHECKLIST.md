@@ -6,6 +6,14 @@ Important constraint for this checklist:
 
 > Passing on the current developer machine is not enough. Release readiness requires explicit environment-independence review and clean-machine acceptance planning.
 
+Installed-build smoke check:
+
+```powershell
+.\Test-AI-StrategistInstall.ps1 -InstallDir "C:\Program Files\AI Strategist"
+```
+
+Use `-SkipAppExe` only for staged resource smoke checks; release acceptance should verify the installed app executable too.
+
 Release gates: every item below must be either ✅ Done or explicitly marked ❌ Deferred (with rationale) before publishing binaries.
 
 ## 1) Product Scope Lock
