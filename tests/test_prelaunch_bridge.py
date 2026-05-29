@@ -179,6 +179,10 @@ class PrelaunchBridgeTests(unittest.TestCase):
                 return_value={"ok": True},
             ), mock.patch.object(
                 prelaunch_manager,
+                "desktop_codex_running_processes",
+                return_value=[],
+            ), mock.patch.object(
+                prelaunch_manager,
                 "codex_running_processes",
                 return_value=[],
             ), mock.patch.object(
@@ -197,6 +201,20 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertEqual(payload["method"], "product_resolved_exe")
         self.assertEqual(payload["exe"], str(exe))
         popen.assert_called_once()
+
+    def test_launch_codex_desktop_returns_existing_instance_without_takeover(self):
+        running = [{"pid": 4242, "image": "Codex.exe", "exe": "C:/Program Files/WindowsApps/OpenAI.Codex/app/Codex.exe"}]
+        with mock.patch("prelaunch_manager.desktop_codex_running_processes", return_value=running), mock.patch(
+            "prelaunch_manager.prepare_codex_takeover"
+        ) as takeover, mock.patch("prelaunch_manager.focus_codex_window") as focus:
+            payload = prelaunch_manager.launch_codex_desktop()
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["method"], "already_running")
+        self.assertEqual(payload["processes"], running)
+        self.assertEqual(payload["foreground"]["reason"], "already_running_no_focus")
+        takeover.assert_not_called()
+        focus.assert_not_called()
 
     def test_resolved_codex_desktop_exe_prefers_explicit_environment_path(self):
         with tempfile.TemporaryDirectory() as temp_dir:

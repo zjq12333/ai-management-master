@@ -1045,6 +1045,15 @@ def launch_codex_desktop() -> dict[str, object]:
     Primary: product-resolved executable path injected by the Tauri runtime
     resolver. Fallback: Start menu AppID via `shell:AppsFolder\\<AppID>`.
     """
+    running = desktop_codex_running_processes()
+    if running:
+        return {
+            "ok": True,
+            "method": "already_running",
+            "processes": running,
+            "foreground": {"ok": False, "skipped": True, "reason": "already_running_no_focus"},
+        }
+
     takeover = prepare_codex_takeover()
     if not bool(takeover.get("ok")):
         return {
