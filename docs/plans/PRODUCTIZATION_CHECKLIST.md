@@ -32,8 +32,14 @@ These items are required for the main workflow. If missing, the product is not c
 ### 1.2 Codex Runtime
 
 - [ ] Bundle or product-manage a stable runnable Codex CLI path.
-- [ ] Ensure launch/bridge logic does not depend on shell alias resolution.
+- [x] Ensure launch/bridge logic rejects `WindowsApps` Codex shim paths from explicit runtime injection.
 - [ ] Ensure all internal wrappers use product-controlled paths.
+
+Evidence:
+
+- `codex_desktop_app_paths.resolved_codex_desktop_exe()` rejects `WindowsApps\OpenAI.Codex_...\app\Codex.exe` even when explicitly injected through `AI_STRATEGIST_CODEX_DESKTOP`.
+- Tauri `runtime_resolver` rejects the same shim from `AI_STRATEGIST_CODEX_DESKTOP` before falling back to safer discovery.
+- Regression coverage: `python -m pytest tests/test_prelaunch_bridge.py -q` and `cargo test runtime_resolver`.
 
 ### 1.3 Python Bridge Runtime
 

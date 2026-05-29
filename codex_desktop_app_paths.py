@@ -10,9 +10,16 @@ from typing import Callable
 def resolved_codex_desktop_exe(env: dict[str, str] | None = None) -> str | None:
     source = env or os.environ
     resolved = source.get("AI_STRATEGIST_CODEX_DESKTOP")
-    if resolved and Path(resolved).exists():
+    if resolved and Path(resolved).exists() and not is_windowsapps_codex_path(resolved):
         return resolved
     return None
+
+
+def is_windowsapps_codex_path(value: str | os.PathLike[str] | None) -> bool:
+    if not value:
+        return False
+    normalized = str(value).replace("/", "\\").lower()
+    return "\\windowsapps\\openai.codex_" in normalized and normalized.endswith("\\app\\codex.exe")
 
 
 def codex_desktop_env_path_candidates(env: dict[str, str] | None = None) -> list[Path]:

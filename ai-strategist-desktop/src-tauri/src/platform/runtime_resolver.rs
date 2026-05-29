@@ -36,7 +36,13 @@ fn env_runtime_path(key: &str, source: ResolvedRuntimeSource) -> Option<Resolved
     std::env::var_os(key)
         .map(PathBuf::from)
         .filter(|path| path.exists())
+        .filter(|path| !(key == "AI_STRATEGIST_CODEX_DESKTOP" && is_windowsapps_codex_desktop_shim(path)))
         .map(|path| ResolvedRuntime { path, source })
+}
+
+fn is_windowsapps_codex_desktop_shim(path: &PathBuf) -> bool {
+    let normalized = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    normalized.contains("\\windowsapps\\openai.codex_") && normalized.ends_with("\\app\\codex.exe")
 }
 
 fn python_runtime_supports_modules(path: &PathBuf, modules: &[&str]) -> bool {
@@ -402,7 +408,7 @@ fn find_codex_in_uninstall_entries(root: &str) -> Option<PathBuf> {
 mod tests {
     use super::{
         bundled_python_candidates, find_on_path, python_runtime_supports_modules,
-        resolve_python_runtime, ResolvedRuntimeSource,
+        resolve_codex_desktop_exe, resolve_python_runtime, ResolvedRuntimeSource,
     };
     use std::fs;
     use std::sync::Mutex;
@@ -482,5 +488,39 @@ mod tests {
 
         assert_eq!(excluded, None);
         assert_eq!(allowed, Some(candidate));
+    }
+
+    #[test]
+    fn explicit_codex_desktop_runtime_rejects_windowsapps_shim() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let root = std::env::temp_dir().join(format!(
+            "ai-strategist-codex-desktop-env-test-{}",
+            std::process::id()
+        ));
+        let windowsapps_shim = root
+            .join("Microsoft")
+            .join("WindowsApps")
+            .join("OpenAI.Codex_26.519.5221.0_x64__2p2nqsd0c76g0")
+            .join("app")
+            .join("Codex.exe");
+        fs::create_dir_all(windowsapps_shim.parent().expect("shim parent")).expect("shim dir");
+        fs::write(&windowsapps_shim, b"").expect("shim");
+
+        let original_runtime = std::env::var_os("AI_STRATEGIST_CODEX_DESKTOP");
+        let original_path = std::env::var_os("PATH");
+        std::env::set_var("AI_STRATEGIST_CODEX_DESKTOP", windowsapps_shim.as_os_str());
+        std::env::set_var("PATH", "");
+        let resolved = resolve_codex_desktop_exe();
+        match original_runtime {
+            Some(value) => std::env::set_var("AI_STRATEGIST_CODEX_DESKTOP", value),
+            None => std::env::remove_var("AI_STRATEGIST_CODEX_DESKTOP"),
+        }
+        match original_path {
+            Some(value) => std::env::set_var("PATH", value),
+            None => std::env::remove_var("PATH"),
+        }
+        let _ = fs::remove_dir_all(&root);
+
+        assert_eq!(resolved, None);
     }
 }

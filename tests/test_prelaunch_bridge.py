@@ -194,6 +194,24 @@ class PrelaunchBridgeTests(unittest.TestCase):
 
         self.assertEqual(resolved, str(exe))
 
+    def test_resolved_codex_desktop_exe_rejects_windowsapps_shim(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            exe = (
+                Path(temp_dir)
+                / "Microsoft"
+                / "WindowsApps"
+                / "OpenAI.Codex_26.519.5221.0_x64__2p2nqsd0c76g0"
+                / "app"
+                / "Codex.exe"
+            )
+            exe.parent.mkdir(parents=True)
+            exe.write_text("", encoding="utf-8")
+
+            with mock.patch.dict("os.environ", {"AI_STRATEGIST_CODEX_DESKTOP": str(exe)}, clear=False):
+                resolved = prelaunch_manager.resolved_codex_desktop_exe()
+
+        self.assertIsNone(resolved)
+
     def test_codex_desktop_env_path_candidates_include_common_localappdata_install(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with mock.patch.dict("os.environ", {"LOCALAPPDATA": temp_dir}, clear=False):
