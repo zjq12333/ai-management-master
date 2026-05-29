@@ -40,6 +40,7 @@
       "nsis"
     ],
     "resources": {
+      "resources/prelaunch": "prelaunch",
       "../../prelaunch_bridge.py": "prelaunch_bridge.py",
       "../../prelaunch_manager.py": "prelaunch_manager.py",
       "../../repair_codex_desktop_history.py": "repair_codex_desktop_history.py",

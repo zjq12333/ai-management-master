@@ -32,21 +32,38 @@ fn repo_root_from_manifest() -> PathBuf {
         .to_path_buf()
 }
 
-fn bridge_script_path() -> PathBuf {
+fn explicit_bridge_path_from_env() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("AI_STRATEGIST_PRELAUNCH_BRIDGE") {
         let path = PathBuf::from(path);
         if path.exists() {
-            return path;
+            return Some(path);
         }
     }
+    None
+}
 
-    for candidate in bundled_bridge_candidates() {
-        if candidate.exists() {
-            return candidate;
-        }
-    }
+fn bridge_program_path() -> Option<PathBuf> {
+    explicit_bridge_path_from_env().or_else(|| {
+        bundled_bridge_candidates()
+            .into_iter()
+            .find(|candidate| candidate.exists())
+    })
+}
 
-    repo_root_from_manifest().join("prelaunch_bridge.py")
+fn bridge_script_path() -> PathBuf {
+    bridge_program_path()
+        .filter(|path| !is_windows_executable(path))
+        .unwrap_or_else(|| repo_root_from_manifest().join("prelaunch_bridge.py"))
+}
+
+fn bridge_exe_path() -> Option<PathBuf> {
+    bridge_program_path().filter(|path| is_windows_executable(path))
+}
+
+fn is_windows_executable(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
 }
 
 fn bundled_bridge_candidates() -> Vec<PathBuf> {
@@ -57,14 +74,33 @@ fn bundled_bridge_candidates() -> Vec<PathBuf> {
         return Vec::new();
     };
 
+    let mut candidates = Vec::new();
+    for file_name in ["prelaunch_bridge.exe", "prelaunch_bridge.py"] {
+        candidates.extend([
+            exe_dir.join(file_name),
+            exe_dir.join("prelaunch").join(file_name),
+            exe_dir.join("resources").join(file_name),
+            exe_dir.join("resources").join("prelaunch").join(file_name),
+            exe_dir.join("_up_").join(file_name),
+            exe_dir.join("_up_").join("prelaunch").join(file_name),
+            exe_dir.join("..").join("Resources").join(file_name),
+            exe_dir
+                .join("..")
+                .join("Resources")
+                .join("prelaunch")
+                .join(file_name),
+        ]);
+    }
+    candidates
+}
+
+fn bridge_command_prefix() -> Vec<String> {
+    if let Some(path) = bridge_exe_path() {
+        return vec![path.display().to_string()];
+    }
     vec![
-        exe_dir.join("prelaunch_bridge.py"),
-        exe_dir.join("resources").join("prelaunch_bridge.py"),
-        exe_dir.join("_up_").join("prelaunch_bridge.py"),
-        exe_dir
-            .join("..")
-            .join("Resources")
-            .join("prelaunch_bridge.py"),
+        python_command(),
+        bridge_script_path().display().to_string(),
     ]
 }
 
@@ -119,13 +155,12 @@ fn bridge_command_with_mode(
     hide_official_quota_notice: bool,
     restore_history: bool,
 ) -> Vec<String> {
-    let mut command = vec![
-        python_command(),
-        bridge_script_path().display().to_string(),
+    let mut command = bridge_command_prefix();
+    command.extend([
         subcommand.to_string(),
         "--codex-home".to_string(),
         codex_home.to_string(),
-    ];
+    ]);
     if let Some(mode) = mode {
         command.push("--mode".to_string());
         command.push(mode.to_string());
@@ -983,6 +1018,30 @@ mod tests {
         std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", &bridge);
 
         assert_eq!(bridge_script_path(), bridge);
+        fs::remove_file(&bridge).ok();
+
+        if let Some(previous) = previous {
+            std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", previous);
+        } else {
+            std::env::remove_var("AI_STRATEGIST_PRELAUNCH_BRIDGE");
+        }
+    }
+
+    #[test]
+    fn bridge_command_runs_explicit_bridge_exe_directly() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var_os("AI_STRATEGIST_PRELAUNCH_BRIDGE");
+        let bridge = std::env::temp_dir().join(format!(
+            "ai-strategist-custom-bridge-{}.exe",
+            std::process::id()
+        ));
+        fs::write(&bridge, b"test bridge").expect("write bridge");
+        std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", &bridge);
+
+        let command = bridge_command("repair", r"C:\Users\test\.codex");
+        assert_eq!(command[0], bridge.display().to_string());
+        assert_eq!(command[1], "repair");
+        assert!(!command.contains(&python_command()));
         fs::remove_file(&bridge).ok();
 
         if let Some(previous) = previous {
