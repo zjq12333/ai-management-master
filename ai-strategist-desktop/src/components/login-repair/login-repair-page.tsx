@@ -23,6 +23,7 @@ import type {
   PrelaunchMode,
   PrelaunchProviderPayload,
   PrelaunchRecoveryOptionsPayload,
+  PrelaunchStopRuntimePayload,
   PrelaunchThreadAttributionPayload,
   PrelaunchStatusPayload,
 } from "@/types/prelaunch";
@@ -38,7 +39,7 @@ function getDefaultCodexHome() {
 export const DEFAULT_CODEX_HOME = getDefaultCodexHome();
 
 const launchModes: { mode: PrelaunchMode; title: string; desc: string }[] = [
-  { mode: "official", title: "增强登录", desc: "复用上次混合登录保存的官方账号 + Relay 配置，不需要重复填写 Provider 信息。" },
+  { mode: "official", title: "打开 Codex", desc: "普通用户入口。只打开 Codex；如果 Codex 已经在运行，就不会关闭、聚焦或重复启动。" },
   { mode: "api", title: "API 供应商启动", desc: "使用第三方 API / Relay provider 启动，适合纯 API 通道。" },
   { mode: "hybrid", title: "混合登录", desc: "官方账号 + API（第三方也行）同时登录，保持插件等原生功能。" },
 ];
@@ -304,7 +305,7 @@ export function LoginRepairPage() {
     try {
       const result = await stopRuntimeMutation.mutateAsync();
       if (!result.ok) {
-        setStopRuntimeError("仍检测到 Codex 进程，请手动关闭后再继续。");
+        setStopRuntimeError(buildStopRuntimeError(result));
         return;
       }
       const action = pendingRuntimeAction;
@@ -647,19 +648,19 @@ function RunningCodexWarningDialog({
     <AlertDialog open={open}>
       <AlertDialogContent className="max-w-md">
         <AlertDialogHeader>
-          <AlertDialogTitle>Codex 正在运行</AlertDialogTitle>
+          <AlertDialogTitle>要重启 Codex 吗？</AlertDialogTitle>
           <AlertDialogDescription>
-            修复/重启 Codex 会关闭当前 Codex Desktop 和 codex CLI。你可以自己关闭，也可以确认让我结束后继续修复。
+            重启前需要先关闭当前 Codex。继续后我会先关闭它，再重新准备启动。
             {processLabel ? <span className="mt-3 block break-words text-xs">检测到：{processLabel}</span> : null}
-            {error ? <span className="mt-3 block text-xs text-destructive">{error}</span> : null}
+            {error ? <span className="mt-3 block text-xs text-destructive">没关掉：{error}</span> : null}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <Button variant="outline" onClick={onClose} disabled={stopping}>
-            我自己关闭
+            取消
           </Button>
           <AlertDialogAction onClick={onStopAndContinue} disabled={stopping}>
-            {stopping ? "正在关闭..." : "确认关闭并修复"}
+            {stopping ? "正在关闭..." : "关闭并重启"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -721,6 +722,20 @@ function buildLaunchNotice(result: PrelaunchLaunchPayload): string | null {
     return "接管 Codex 失败。请先手动关闭 Codex，或使用明确的修复/重启入口。";
   }
   return null;
+}
+
+function buildStopRuntimeError(result: PrelaunchStopRuntimePayload): string {
+  const remaining = result.remaining ?? [];
+  const errors = result.errors ?? [];
+  const processText =
+    remaining.length > 0
+      ? `还有 ${remaining.length} 个 Codex 进程没有退出：${remaining
+          .slice(0, 4)
+          .map((process) => `${process.image ?? "codex"}${process.pid == null ? "" : ` PID ${process.pid}`}`)
+          .join("、")}`
+      : "仍检测到 Codex 进程";
+  const errorText = errors.length > 0 ? `。系统返回：${errors.slice(0, 2).join("；")}` : "";
+  return `${processText}${errorText}`;
 }
 
 type AttributionSummary = {
