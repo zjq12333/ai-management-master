@@ -160,6 +160,7 @@ export function LoginRepairPage() {
   const [runningProcessLabel, setRunningProcessLabel] = useState("");
   const [pendingRuntimeAction, setPendingRuntimeAction] = useState<PendingRuntimeAction | null>(null);
   const [stopRuntimeError, setStopRuntimeError] = useState<string | null>(null);
+  const [runtimeSafetyNotice, setRuntimeSafetyNotice] = useState<string | null>(null);
   const [activeProviderMode, setActiveProviderMode] = useState<PrelaunchMode | null>(null);
   const [providerDraft, setProviderDraft] = useState<ProviderDraft>(defaultProviderDraft);
   const [providerError, setProviderError] = useState<string | null>(null);
@@ -223,18 +224,25 @@ export function LoginRepairPage() {
   const checkRuntimeReady = async (action: PendingRuntimeAction) => {
     const runtime = await api.prelaunchRuntimeStatus();
     if (runtime.codex_running) {
+      const processLabel = runtime.processes
+        .map((process) => [process.image, process.pid == null ? null : `PID ${process.pid}`].filter(Boolean).join(" "))
+        .filter(Boolean)
+        .slice(0, 8)
+        .join("、");
+      if (action.type === "launch") {
+        setRuntimeSafetyNotice(
+          `检测到 Codex 已在运行：${processLabel || "已有 Codex 进程"}。普通启动不会关闭、聚焦或重复拉起 Codex；如需强制重启，请使用“修复/重启 Codex”。`,
+        );
+        return false;
+      }
+      setRuntimeSafetyNotice(null);
       setPendingRuntimeAction(action);
       setStopRuntimeError(null);
-      setRunningProcessLabel(
-        runtime.processes
-          .map((process) => [process.image, process.pid == null ? null : `PID ${process.pid}`].filter(Boolean).join(" "))
-          .filter(Boolean)
-          .slice(0, 8)
-          .join("、"),
-      );
+      setRunningProcessLabel(processLabel);
       setRunningWarningOpen(true);
       return false;
     }
+    setRuntimeSafetyNotice(null);
     return true;
   };
 
@@ -365,6 +373,15 @@ export function LoginRepairPage() {
         </BentoCard>
       ) : null}
 
+      {runtimeSafetyNotice ? (
+        <BentoCard>
+          <div className="space-y-2 text-sm">
+            <div className="font-semibold text-amber-700">安全启动已拦截</div>
+            <p className="leading-6 text-muted-foreground">{runtimeSafetyNotice}</p>
+          </div>
+        </BentoCard>
+      ) : null}
+
       {activeProviderMode ? (
         <BentoCard>
           <div className="space-y-4">
@@ -454,13 +471,13 @@ export function LoginRepairPage() {
       ) : null}
 
       <ActionCard
-        title="修复恢复"
-        desc="执行历史记录、workspace 和 session index 修复，并输出报告。"
+        title="修复/重启 Codex"
+        desc="显式修复入口。继续前会要求确认关闭当前 Codex，然后修复历史、workspace 和 session index。"
         icon={Wrench}
         busy={repairMutation.isPending}
         disabled={providerDisabled}
-        actionLabel="开始修复"
-        busyLabel="修复中..."
+        actionLabel="修复/重启 Codex"
+        busyLabel="修复/重启中..."
         onClick={() => void repairWithRuntimeCheck()}
       />
 
@@ -632,7 +649,7 @@ function RunningCodexWarningDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Codex 正在运行</AlertDialogTitle>
           <AlertDialogDescription>
-            切换启动模式或修复历史前，需要先关闭 Codex Desktop 和 codex CLI。你可以自己关闭，也可以让我帮你结束后继续。
+            修复/重启 Codex 会关闭当前 Codex Desktop 和 codex CLI。你可以自己关闭，也可以确认让我结束后继续修复。
             {processLabel ? <span className="mt-3 block break-words text-xs">检测到：{processLabel}</span> : null}
             {error ? <span className="mt-3 block text-xs text-destructive">{error}</span> : null}
           </AlertDialogDescription>
@@ -642,7 +659,7 @@ function RunningCodexWarningDialog({
             我自己关闭
           </Button>
           <AlertDialogAction onClick={onStopAndContinue} disabled={stopping}>
-            {stopping ? "正在关闭..." : "帮我关闭并继续"}
+            {stopping ? "正在关闭..." : "确认关闭并修复"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -666,6 +683,7 @@ function ActionCard({ title, desc, icon: Icon, busy, disabled, actionLabel, busy
 function ResultCard({ result }: { result: PrelaunchLaunchPayload }) {
   const attributionSummary = buildAttributionSummary(result);
   const hasRepairSummary = Boolean(result.repair?.summary);
+  const launchNotice = buildLaunchNotice(result);
 
   return (
     <BentoCard>
@@ -684,10 +702,25 @@ function ResultCard({ result }: { result: PrelaunchLaunchPayload }) {
           <Detail label="结果" value={result.ok ? "成功" : "失败"} />
           {result.error ? <Detail label="错误" value={result.error} /> : null}
         </div>
+        {launchNotice ? <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">{launchNotice}</p> : null}
         {hasRepairSummary ? <AttributionSummaryPanel summary={attributionSummary} /> : null}
       </div>
     </BentoCard>
   );
+}
+
+function buildLaunchNotice(result: PrelaunchLaunchPayload): string | null {
+  const method = result.launch?.method;
+  if (method === "already_running") {
+    return "Codex 已经在运行，本次普通启动没有关闭、聚焦或重复拉起 Codex。";
+  }
+  if (method === "retry_takeover_not_allowed") {
+    return "Codex 没有按预期就绪。普通启动不会自动接管或杀进程；如需强制重启，请使用“修复/重启 Codex”。";
+  }
+  if (method === "takeover_failed") {
+    return "接管 Codex 失败。请先手动关闭 Codex，或使用明确的修复/重启入口。";
+  }
+  return null;
 }
 
 type AttributionSummary = {
