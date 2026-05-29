@@ -86,6 +86,8 @@ AI Strategist.exe
 .\Verify-AI-Strategist.ps1
 ```
 
+该脚本会运行 Python / frontend / Rust checks，并验证 Tauri bundled `prelaunch_bridge.exe` 资源存在且可执行。
+
 ## 旧 Tkinter 入口
 
 旧的 Python/Tkinter 工具仍保留为参考和回退入口：

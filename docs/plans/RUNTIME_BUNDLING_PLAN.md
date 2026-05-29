@@ -75,6 +75,7 @@ The first migration target is:
 - `Build-PrelaunchBridge.ps1` builds that executable with PyInstaller when PyInstaller is installed in the active Python environment.
 - Runtime lookup now supports explicit environment override, common Tauri bundled-resource layouts, product-managed local directories, and PATH fallback.
 - The actual `prelaunch_bridge.exe` artifact is produced and committed under the Tauri prelaunch resources directory.
+- `Verify-AI-Strategist.ps1` checks the bundled bridge resource exists, is mapped in `tauri.conf.json`, and can run safe smoke commands.
 - Still pending: verify the bundled bridge in a clean-machine install flow.
 
 Reason:
