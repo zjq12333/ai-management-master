@@ -101,6 +101,9 @@ class EnhancerHandoffTests(unittest.TestCase):
             self.assertIn("先检查 handoff 逻辑", content)
             self.assertIn("我会先看当前状态", content)
             self.assertIn(str(handoff_path), result["prompt"])
+            self.assertTrue(result["prompt"].startswith("接手任务：测试移交"))
+            self.assertIn("wait for the user's approval before executing it", result["prompt"])
+            self.assertNotIn("Start by executing the Next action cue", result["prompt"])
             self.assertIn("Objective:", result["prompt"])
             self.assertIn("Next action cue:", result["prompt"])
             self.assertIn(
@@ -304,10 +307,12 @@ class EnhancerHandoffTests(unittest.TestCase):
 
         prompt = enhancer_handoff._build_takeover_prompt(Path(r"D:\AIHub\.ai-strategist\handoffs\handoff.md"), handoff_content)
 
+        self.assertTrue(prompt.startswith("接手任务：Request Ledger + Token Savings Meter"))
         self.assertIn("Objective: Request Ledger + Token Savings Meter", prompt)
         self.assertNotIn(f"Objective: {thread_id}", prompt)
         self.assertIn("Next action cue: Continue Request Ledger + Token Savings Meter.", prompt)
         self.assertNotIn("Next action cue: Infer from current workspace state.", prompt)
+        self.assertIn("wait for the user's approval before executing it", prompt)
         self.assertIn(
             "Communicate with the user in Chinese, but you may keep task work artifacts in English when appropriate.",
             prompt,

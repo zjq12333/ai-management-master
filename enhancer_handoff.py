@@ -420,7 +420,9 @@ def _build_takeover_prompt(handoff_path: Path, handoff_content: str) -> str:
         objective = _derive_objective_from_evidence(evidence) or objective
     if next_action == "Infer from current workspace state.":
         next_action = _derive_next_action_from_evidence(evidence)
+    topic = objective or next_action or "Handoff takeover"
     lines = [
+        f"接手任务：{topic}",
         "Continue the same task; do not restart analysis from zero.",
         f"Handoff file: {handoff_path}",
     ]
@@ -435,7 +437,7 @@ def _build_takeover_prompt(handoff_path: Path, handoff_content: str) -> str:
     lines.extend(
         [
             "Read the handoff file only if these fields are insufficient.",
-            "Start by executing the Next action cue; do not explain that you will read the handoff.",
+            "After you understand the handoff, propose your next work plan and wait for the user's approval before executing it.",
             "Communicate with the user in Chinese, but you may keep task work artifacts in English when appropriate.",
         ]
     )
