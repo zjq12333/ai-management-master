@@ -746,6 +746,51 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["killed"], [{"image": "Codex.exe", "pid": 1234}])
 
+    def test_runtime_helper_filter_skips_codex_desktop_gui(self):
+        gui = {
+            "image": "Codex.exe",
+            "pid": 1234,
+            "exe": r"C:\Program Files\WindowsApps\OpenAI.Codex\app\Codex.exe",
+        }
+        helper = {
+            "image": "codex.exe",
+            "pid": 2345,
+            "exe": r"C:\Program Files\WindowsApps\OpenAI.Codex\app\resources\codex.exe",
+        }
+
+        self.assertFalse(prelaunch_manager.is_runtime_helper_process(gui))
+        self.assertTrue(prelaunch_manager.is_runtime_helper_process(helper))
+
+    def test_terminate_codex_processes_only_targets_runtime_helpers_without_tree_kill(self):
+        processes = [
+            {
+                "image": "Codex.exe",
+                "pid": 1234,
+                "exe": r"C:\Program Files\WindowsApps\OpenAI.Codex\app\Codex.exe",
+            },
+            {
+                "image": "codex.exe",
+                "pid": 2345,
+                "exe": r"C:\Program Files\WindowsApps\OpenAI.Codex\app\resources\codex.exe",
+            },
+        ]
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(
+            prelaunch_manager,
+            "codex_running_processes",
+            side_effect=[processes, []],
+        ), mock.patch.object(prelaunch_manager.subprocess, "run", side_effect=fake_run):
+            payload = prelaunch_manager.terminate_codex_processes(timeout_seconds=0.1)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["killed"], [processes[1]])
+        self.assertEqual(calls, [["taskkill", "/PID", "2345", "/F"]])
+
     def test_official_launch_skips_history_restore_and_returns_structured_payload(self):
         calls = []
         compatibility_payload = {"ok": True, "skipped": True, "reason": "compatibility_check_only", "status": {"rows_needing_reconcile": 0}}

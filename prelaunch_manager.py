@@ -1372,11 +1372,57 @@ def is_codex_or_cli_running() -> bool:
 
 
 def codex_running_processes() -> list[dict[str, object]]:
+    processes: list[dict[str, object]] = []
+    seen: set[tuple[str, int | None]] = set()
+    if shutil.which("powershell"):
+        try:
+            process = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "Get-CimInstance Win32_Process -Filter \"Name='Codex.exe' OR Name='codex.exe'\" "
+                    "| Select-Object Name,ProcessId,ExecutablePath "
+                    "| ConvertTo-Csv -NoTypeInformation",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                **subprocess_window_options(),
+            )
+        except Exception:
+            process = None
+        if process and process.returncode == 0:
+            for raw_line in (process.stdout or "").splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                columns = [part.strip().strip('"') for part in line.split('","')]
+                if not columns or columns[0] == "Name":
+                    continue
+                pid = None
+                if len(columns) > 1:
+                    try:
+                        pid = int(columns[1])
+                    except ValueError:
+                        pid = None
+                dedupe_key = (columns[0].lower(), pid)
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                processes.append(
+                    {
+                        "image": columns[0],
+                        "pid": pid,
+                        "exe": columns[2] if len(columns) > 2 else "",
+                    }
+                )
+            return processes
+
     if not shutil.which("tasklist"):
         return []
 
-    processes: list[dict[str, object]] = []
-    seen: set[tuple[str, int | None]] = set()
     for image_name in ("Codex.exe", "codex.exe"):
         try:
             process = subprocess.run(
@@ -1412,8 +1458,22 @@ def codex_running_processes() -> list[dict[str, object]]:
     return processes
 
 
+def is_runtime_helper_process(process: dict[str, object]) -> bool:
+    image = str(process.get("image") or "")
+    exe = str(process.get("exe") or "").replace("/", "\\").lower()
+    return image.lower() == "codex.exe" and (
+        "\\app\\resources\\codex.exe" in exe
+        or exe.endswith("\\resources\\codex.exe")
+        or exe.endswith("\\codex\\codex.exe")
+    )
+
+
 def terminate_codex_processes(timeout_seconds: float = 5.0) -> dict[str, object]:
-    processes = [process for process in codex_running_processes() if process.get("pid") is not None]
+    processes = [
+        process
+        for process in codex_running_processes()
+        if process.get("pid") is not None and is_runtime_helper_process(process)
+    ]
     killed: list[dict[str, object]] = []
     errors: list[str] = []
 
@@ -1423,7 +1483,7 @@ def terminate_codex_processes(timeout_seconds: float = 5.0) -> dict[str, object]
             continue
         try:
             result = subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                ["taskkill", "/PID", str(pid), "/F"],
                 text=True,
                 encoding="utf-8",
                 errors="replace",
@@ -1441,10 +1501,10 @@ def terminate_codex_processes(timeout_seconds: float = 5.0) -> dict[str, object]
             errors.append(f"{process.get('image')} PID {pid}: {message}")
 
     deadline = time.time() + timeout_seconds
-    remaining = codex_running_processes()
+    remaining = [process for process in codex_running_processes() if is_runtime_helper_process(process)]
     while remaining and time.time() < deadline:
         time.sleep(0.2)
-        remaining = codex_running_processes()
+        remaining = [process for process in codex_running_processes() if is_runtime_helper_process(process)]
 
     return {
         "ok": not remaining,

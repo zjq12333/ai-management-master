@@ -682,9 +682,80 @@ fn parse_tasklist_processes(image_name: &str, text: &str) -> Vec<Value> {
     processes
 }
 
+fn parse_cim_processes(text: &str) -> Vec<Value> {
+    let mut processes = Vec::new();
+    for raw_line in text.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.trim_matches('"').starts_with("Name\",\"") || line.starts_with("Name,") {
+            continue;
+        }
+        let columns = line
+            .split(',')
+            .map(|part| part.trim().trim_matches('"').to_string())
+            .collect::<Vec<_>>();
+        let Some(image) = columns.first().filter(|value| !value.is_empty()) else {
+            continue;
+        };
+        let pid = columns
+            .get(1)
+            .and_then(|value| value.parse::<i64>().ok())
+            .map(Value::from)
+            .unwrap_or(Value::Null);
+        let exe = columns.get(2).cloned().unwrap_or_default();
+        processes.push(serde_json::json!({
+            "image": image,
+            "pid": pid,
+            "exe": exe,
+        }));
+    }
+    processes
+}
+
+fn is_runtime_helper_process(process: &Value) -> bool {
+    let image = process
+        .get("image")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let exe = process
+        .get("exe")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .replace("/", "\\")
+        .to_lowercase();
+
+    image.eq_ignore_ascii_case("codex.exe")
+        && (exe.contains("\\app\\resources\\codex.exe")
+            || exe.ends_with("\\resources\\codex.exe")
+            || exe.ends_with("\\codex\\codex.exe"))
+}
+
 fn codex_running_processes_from_rust() -> Vec<Value> {
     let mut processes = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let output = hidden_command("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_Process -Filter \"Name='Codex.exe' OR Name='codex.exe'\" | Select-Object Name,ProcessId,ExecutablePath | ConvertTo-Csv -NoTypeInformation",
+        ])
+        .output();
+    if let Ok(output) = output {
+        if output.status.success() {
+            for process in parse_cim_processes(&String::from_utf8_lossy(&output.stdout)) {
+                let image = process
+                    .get("image")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_lowercase();
+                let pid = process.get("pid").and_then(Value::as_i64);
+                if seen.insert((image, pid)) {
+                    processes.push(process);
+                }
+            }
+            return processes;
+        }
+    }
+
     for image_name in ["Codex.exe", "codex.exe"] {
         let output = hidden_command("tasklist")
             .args(["/FI", &format!("IMAGENAME eq {image_name}"), "/FO", "CSV", "/NH"])
@@ -723,7 +794,6 @@ fn taskkill_args(pid: i64) -> Vec<String> {
     vec![
         "/PID".to_string(),
         pid.to_string(),
-        "/T".to_string(),
         "/F".to_string(),
     ]
 }
@@ -731,6 +801,7 @@ fn taskkill_args(pid: i64) -> Vec<String> {
 fn terminate_codex_processes_from_rust(timeout_seconds: f64) -> Value {
     let processes = codex_running_processes_from_rust()
         .into_iter()
+        .filter(is_runtime_helper_process)
         .filter(|process| process.get("pid").and_then(Value::as_i64).is_some())
         .collect::<Vec<_>>();
     let mut killed = Vec::new();
@@ -771,10 +842,16 @@ fn terminate_codex_processes_from_rust(timeout_seconds: f64) -> Value {
 
     let deadline =
         std::time::Instant::now() + std::time::Duration::from_secs_f64(timeout_seconds.max(0.0));
-    let mut remaining = codex_running_processes_from_rust();
+    let mut remaining = codex_running_processes_from_rust()
+        .into_iter()
+        .filter(is_runtime_helper_process)
+        .collect::<Vec<_>>();
     while !remaining.is_empty() && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(200));
-        remaining = codex_running_processes_from_rust();
+        remaining = codex_running_processes_from_rust()
+            .into_iter()
+            .filter(is_runtime_helper_process)
+            .collect::<Vec<_>>();
     }
 
     serde_json::json!({
@@ -1486,10 +1563,40 @@ experimental_bearer_token = "sk-test"
     }
 
     #[test]
-    fn stop_runtime_taskkill_args_match_legacy_bridge() {
-        assert_eq!(
-            super::taskkill_args(1234),
-            vec!["/PID", "1234", "/T", "/F"]
+    fn parses_cim_process_csv_rows_with_executable_paths() {
+        let processes = super::parse_cim_processes(
+            "\"Name\",\"ProcessId\",\"ExecutablePath\"\r\n\
+             \"Codex.exe\",\"1234\",\"C:\\Program Files\\WindowsApps\\OpenAI.Codex\\app\\Codex.exe\"\r\n\
+             \"codex.exe\",\"2345\",\"C:\\Program Files\\WindowsApps\\OpenAI.Codex\\app\\resources\\codex.exe\"\r\n",
         );
+
+        assert_eq!(processes.len(), 2);
+        assert_eq!(processes[0]["image"], "Codex.exe");
+        assert_eq!(processes[0]["pid"], 1234);
+        assert_eq!(processes[1]["image"], "codex.exe");
+        assert_eq!(processes[1]["pid"], 2345);
+        assert!(processes[1]["exe"].as_str().unwrap().ends_with("resources\\codex.exe"));
+    }
+
+    #[test]
+    fn runtime_helper_filter_skips_desktop_gui_processes() {
+        let gui = serde_json::json!({
+            "image": "Codex.exe",
+            "pid": 1234,
+            "exe": "C:\\Program Files\\WindowsApps\\OpenAI.Codex\\app\\Codex.exe",
+        });
+        let helper = serde_json::json!({
+            "image": "codex.exe",
+            "pid": 2345,
+            "exe": "C:\\Program Files\\WindowsApps\\OpenAI.Codex\\app\\resources\\codex.exe",
+        });
+
+        assert!(!super::is_runtime_helper_process(&gui));
+        assert!(super::is_runtime_helper_process(&helper));
+    }
+
+    #[test]
+    fn stop_runtime_taskkill_args_do_not_kill_process_trees() {
+        assert_eq!(super::taskkill_args(1234), vec!["/PID", "1234", "/F"]);
     }
 }
