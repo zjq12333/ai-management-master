@@ -40,17 +40,32 @@ fn bridge_script_path() -> PathBuf {
         }
     }
 
-    let bundled = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-        .map(|dir| dir.join("resources").join("prelaunch_bridge.py"));
-    if let Some(path) = bundled {
-        if path.exists() {
-            return path;
+    for candidate in bundled_bridge_candidates() {
+        if candidate.exists() {
+            return candidate;
         }
     }
 
     repo_root_from_manifest().join("prelaunch_bridge.py")
+}
+
+fn bundled_bridge_candidates() -> Vec<PathBuf> {
+    let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+    else {
+        return Vec::new();
+    };
+
+    vec![
+        exe_dir.join("prelaunch_bridge.py"),
+        exe_dir.join("resources").join("prelaunch_bridge.py"),
+        exe_dir.join("_up_").join("prelaunch_bridge.py"),
+        exe_dir
+            .join("..")
+            .join("Resources")
+            .join("prelaunch_bridge.py"),
+    ]
 }
 
 fn python_command() -> String {
@@ -932,8 +947,8 @@ pub fn prelaunch_repair(
 mod tests {
     use super::{
         bridge_command, bridge_command_with_mode, bridge_command_with_recovery_options,
-        bridge_runtime_environment, bridge_script_path, python_command, repo_root_from_manifest,
-        resolved_threadripper_env_value, RecoveryOptions,
+        bridge_runtime_environment, bridge_script_path, bundled_bridge_candidates, python_command,
+        repo_root_from_manifest, resolved_threadripper_env_value, RecoveryOptions,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -993,6 +1008,21 @@ mod tests {
         } else {
             std::env::remove_var("AI_STRATEGIST_PRELAUNCH_BRIDGE");
         }
+    }
+
+    #[test]
+    fn bundled_bridge_candidates_cover_tauri_resource_layouts() {
+        let candidates = bundled_bridge_candidates();
+        let rendered = candidates
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("prelaunch_bridge.py"));
+        assert!(rendered.contains("resources"));
+        assert!(rendered.contains("_up_"));
+        assert!(rendered.contains("Resources"));
     }
 
     #[test]

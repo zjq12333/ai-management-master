@@ -39,6 +39,13 @@
       "app",
       "nsis"
     ],
+    "resources": {
+      "../../prelaunch_bridge.py": "prelaunch_bridge.py",
+      "../../prelaunch_manager.py": "prelaunch_manager.py",
+      "../../repair_codex_desktop_history.py": "repair_codex_desktop_history.py",
+      "../../codex_desktop_app_paths.py": "codex_desktop_app_paths.py",
+      "../../codex_desktop_launcher.py": "codex_desktop_launcher.py"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
