@@ -552,7 +552,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertEqual(len(payload), 1)
         self.assertEqual(payload[0]["pid"], 101)
 
-    def test_desktop_codex_running_processes_excludes_windowsapps_resource_helper(self):
+    def test_desktop_codex_running_processes_includes_windowsapps_resource_helper(self):
         with mock.patch.object(
             prelaunch_manager,
             "codex_process_details",
@@ -577,7 +577,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
         ):
             payload = prelaunch_manager.desktop_codex_running_processes()
 
-        self.assertEqual([item["pid"] for item in payload], [101])
+        self.assertEqual([item["pid"] for item in payload], [101, 202])
 
     def test_launch_codex_desktop_with_retry_retries_after_cdp_failure(self):
         attempts: list[int] = []

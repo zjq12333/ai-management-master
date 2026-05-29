@@ -27,7 +27,9 @@ def is_windowsapps_codex_desktop_path(exe_path: str | None) -> bool:
     return (
         "\\windowsapps\\openai.codex_" in normalized
         and "\\app\\codex.exe" in normalized
-        and "\\app\\resources\\codex.exe" not in normalized
+    ) or (
+        "\\windowsapps\\openai.codex_" in normalized
+        and "\\app\\resources\\codex.exe" in normalized
     )
 
 
