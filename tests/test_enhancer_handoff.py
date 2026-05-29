@@ -97,6 +97,7 @@ class EnhancerHandoffTests(unittest.TestCase):
             self.assertIn("- Next action cue: 先检查 handoff 逻辑", content)
             self.assertIn("## Verification", content)
             self.assertIn("## Watchouts", content)
+            self.assertIn("Communicate with the user in Chinese", content)
             self.assertIn("先检查 handoff 逻辑", content)
             self.assertIn("我会先看当前状态", content)
             self.assertIn(str(handoff_path), result["prompt"])

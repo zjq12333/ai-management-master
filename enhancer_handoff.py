@@ -383,6 +383,7 @@ def _render_handoff(
             "1. Continue the same task; do not restart analysis from zero.",
             "2. Read only the files needed for the next concrete step.",
             "3. Prefer the workspace state and this handoff over replaying the full rollout.",
+            "4. Communicate with the user in Chinese; task work artifacts may remain in English when appropriate.",
         ]
     )
 
