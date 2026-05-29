@@ -37,10 +37,20 @@ These items are required for the main workflow. If missing, the product is not c
 
 ### 1.3 Python Bridge Runtime
 
-- [ ] Bundle a Python runtime or ship the bridge in a form that removes Python as a user prerequisite.
+- [x] Bundle a Python runtime or ship the bridge in a form that removes Python as a user prerequisite.
 - [x] Add a repeatable build script for a self-contained `prelaunch_bridge.exe`.
 - [x] Ensure `prelaunch_bridge.py`, `prelaunch_manager.py`, and `repair_codex_desktop_history.py` are callable through product-owned script resource paths.
-- [ ] Remove any assumption that system Python exists.
+- [x] Remove any assumption that system Python exists for the mainline prelaunch bridge path.
+
+Evidence:
+
+- `prelaunch_bridge.exe` is committed under `ai-strategist-desktop/src-tauri/resources/prelaunch/`.
+- `Verify-AI-Strategist.ps1` verifies the bundled bridge resource and safe smoke commands.
+- `Test-AI-StrategistInstall.ps1` passed against a release NSIS install on the developer machine.
+
+Remaining caveat:
+
+- Clean-machine / VM installed-build verification is still required before release acceptance.
 
 ### 1.4 Mainline Helper Tools
 
