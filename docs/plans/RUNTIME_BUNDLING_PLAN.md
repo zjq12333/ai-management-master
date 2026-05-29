@@ -76,7 +76,8 @@ The first migration target is:
 - Runtime lookup now supports explicit environment override, common Tauri bundled-resource layouts, product-managed local directories, and PATH fallback.
 - The actual `prelaunch_bridge.exe` artifact is produced and committed under the Tauri prelaunch resources directory.
 - `Verify-AI-Strategist.ps1` checks the bundled bridge resource exists, is mapped in `tauri.conf.json`, and can run safe smoke commands.
-- Still pending: verify the bundled bridge in a clean-machine install flow.
+- The release NSIS installer has been smoke-tested on the developer machine by installing to a temporary directory, running `Test-AI-StrategistInstall.ps1`, and uninstalling cleanly.
+- Still pending: repeat the same installed-build verification on a clean machine or VM.
 
 Reason:
 

@@ -14,6 +14,13 @@ Installed-build smoke check:
 
 Use `-SkipAppExe` only for staged resource smoke checks; release acceptance should verify the installed app executable too.
 
+Current evidence:
+
+- ✅ Release NSIS installer can install to a temporary directory on the developer machine.
+- ✅ `Test-AI-StrategistInstall.ps1` passes against that installed directory.
+- ✅ Silent uninstall exits successfully and removes the temporary install directory.
+- ❌ Clean-machine or VM acceptance pass is still pending.
+
 Release gates: every item below must be either ✅ Done or explicitly marked ❌ Deferred (with rationale) before publishing binaries.
 
 ## 1) Product Scope Lock

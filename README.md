@@ -13,7 +13,7 @@ AI Strategist 是面向本地 Codex Desktop 的桌面启动与修复工具。当
 - 主功能页：`启动与修复`
 - 导航方式：顶部功能导航；左侧不放导航内容
 - 当前桌面产物：
-  - `AI Strategist.exe`
+- `AI-Strategist.exe`
   - `AI Strategist_1.0.0_x64-setup.exe`
 
 ## 启动与修复包含的能力

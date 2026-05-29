@@ -7,7 +7,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 $resolvedInstallDir = (Resolve-Path -LiteralPath $InstallDir).ProviderPath
-$appExe = Join-Path $resolvedInstallDir "AI Strategist.exe"
+$appExeCandidates = @(
+    (Join-Path $resolvedInstallDir "AI-Strategist.exe"),
+    (Join-Path $resolvedInstallDir "AI Strategist.exe")
+)
 $bridgeExe = Join-Path $resolvedInstallDir "prelaunch\prelaunch_bridge.exe"
 
 function Invoke-Step {
@@ -29,9 +32,11 @@ Write-Host "Install dir: $resolvedInstallDir"
 
 if (-not $SkipAppExe) {
     Invoke-Step "Installed app executable exists" {
-        if (-not (Test-Path -LiteralPath $appExe)) {
-            throw "AI Strategist executable was not found: $appExe"
+        $foundAppExe = $appExeCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if (-not $foundAppExe) {
+            throw "AI Strategist executable was not found. Checked: $($appExeCandidates -join ', ')"
         }
+        Write-Host "Found app executable: $foundAppExe"
     }
 }
 
