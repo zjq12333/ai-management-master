@@ -65,6 +65,15 @@ CDP_WAIT_TIMEOUT_SECONDS = 25.0
 ENHANCER_READY_STABLE_SECONDS = 3.0
 
 
+def windows_system_tool(name: str) -> str:
+    system_root = os.environ.get("SystemRoot")
+    if system_root:
+        candidate = Path(system_root) / "System32" / name
+        if candidate.exists():
+            return str(candidate)
+    return name
+
+
 def codex_desktop_user_data_dir() -> Path:
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
@@ -742,7 +751,7 @@ def evidence_as_json(codex_home: Path) -> str:
 
 def _powershell_output(command: str) -> str:
     process = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", command],
+        [windows_system_tool("WindowsPowerShell\\v1.0\\powershell.exe"), "-NoProfile", "-Command", command],
         text=True,
         encoding="utf-8",
         errors="replace",
@@ -771,7 +780,7 @@ def query_reg_default_value(key_path: str) -> str | None:
         return None
     try:
         output = subprocess.run(
-            ["reg", "query", key_path, "/ve"],
+            [windows_system_tool("reg.exe"), "query", key_path, "/ve"],
             text=True,
             encoding="utf-8",
             errors="replace",

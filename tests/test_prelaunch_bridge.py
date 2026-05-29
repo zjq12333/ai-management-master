@@ -63,6 +63,20 @@ class PrelaunchBridgeTests(unittest.TestCase):
         ), mock.patch("prelaunch_manager.shutil.which", return_value="codex-threadripper"):
             self.assertIsNone(prelaunch_manager.threadripper_command())
 
+    def test_windows_system_tool_prefers_system32_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tool = Path(temp_dir) / "System32" / "reg.exe"
+            tool.parent.mkdir(parents=True)
+            tool.write_text("", encoding="utf-8")
+
+            with mock.patch.dict("os.environ", {"SystemRoot": temp_dir}, clear=False):
+                self.assertEqual(prelaunch_manager.windows_system_tool("reg.exe"), str(tool))
+
+    def test_windows_system_tool_falls_back_to_name_when_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with mock.patch.dict("os.environ", {"SystemRoot": temp_dir}, clear=False):
+                self.assertEqual(prelaunch_manager.windows_system_tool("reg.exe"), "reg.exe")
+
     def test_enhancer_enabled_returns_true_when_one_click_handoff_is_enabled(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             codex_home = Path(temp_dir)

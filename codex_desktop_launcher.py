@@ -3,7 +3,17 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+from pathlib import Path
 from typing import Callable
+
+
+def windows_system_tool(name: str) -> str:
+    system_root = os.environ.get("SystemRoot")
+    if system_root:
+        candidate = Path(system_root) / "System32" / name
+        if candidate.exists():
+            return str(candidate)
+    return name
 
 
 def normalized_windows_path(value: str | None) -> str:
@@ -176,7 +186,7 @@ def terminate_named_processes(
             continue
         try:
             result = subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                [windows_system_tool("taskkill.exe"), "/PID", str(pid), "/T", "/F"],
                 text=True,
                 encoding="utf-8",
                 errors="replace",
