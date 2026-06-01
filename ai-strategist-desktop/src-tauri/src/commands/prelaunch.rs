@@ -1,191 +1,25 @@
-use serde_json::Value;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use super::prelaunch_bridge::{
+    bridge_command, bridge_command_with_mode, bridge_command_with_recovery_options, bridge_exe_path,
+    bridge_program_path, bridge_script_path, RecoveryOptions,
+};
+use super::prelaunch_provider::{
+    provider_json_for_launch, read_model_provider_from_codex_config, reusable_hybrid_provider_key,
+};
+use serde_json::{json, Value};
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-struct ProviderProfile {
-    key: String,
-    name: String,
-    base_url: String,
-    wire_api: String,
-    env_key: String,
-    requires_openai_auth: bool,
-    experimental_bearer_token: String,
+fn codex_home_exists(codex_home: &Path) -> bool {
+    codex_home.exists() && codex_home.is_dir()
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-struct ProviderConfigResult {
-    config_path: String,
-    backup_path: Option<String>,
-    mode: String,
-    target_model_provider: String,
-    verified_model_provider: String,
-}
-
-fn repo_root_from_manifest() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .expect("repo root")
-        .to_path_buf()
-}
-
-fn explicit_bridge_path_from_env() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("AI_STRATEGIST_PRELAUNCH_BRIDGE") {
-        let path = PathBuf::from(path);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-    None
-}
-
-fn bridge_program_path() -> Option<PathBuf> {
-    explicit_bridge_path_from_env().or_else(|| {
-        bundled_bridge_candidates()
-            .into_iter()
-            .find(|candidate| candidate.exists())
+fn path_status(path: &Path) -> Value {
+    json!({
+        "path": path.display().to_string(),
+        "exists": path.exists(),
     })
-}
-
-fn bridge_script_path() -> PathBuf {
-    bridge_program_path()
-        .filter(|path| !is_windows_executable(path))
-        .unwrap_or_else(|| repo_root_from_manifest().join("prelaunch_bridge.py"))
-}
-
-fn bridge_exe_path() -> Option<PathBuf> {
-    bridge_program_path().filter(|path| is_windows_executable(path))
-}
-
-fn is_windows_executable(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
-}
-
-fn bundled_bridge_candidates() -> Vec<PathBuf> {
-    let Some(exe_dir) = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-    else {
-        return Vec::new();
-    };
-
-    let mut candidates = Vec::new();
-    for file_name in ["prelaunch_bridge.exe", "prelaunch_bridge.py"] {
-        candidates.extend([
-            exe_dir.join(file_name),
-            exe_dir.join("prelaunch").join(file_name),
-            exe_dir.join("resources").join(file_name),
-            exe_dir.join("resources").join("prelaunch").join(file_name),
-            exe_dir.join("_up_").join(file_name),
-            exe_dir.join("_up_").join("prelaunch").join(file_name),
-            exe_dir.join("..").join("Resources").join(file_name),
-            exe_dir
-                .join("..")
-                .join("Resources")
-                .join("prelaunch")
-                .join(file_name),
-        ]);
-    }
-    candidates
-}
-
-fn bridge_command_prefix() -> Vec<String> {
-    if let Some(path) = bridge_exe_path() {
-        return vec![path.display().to_string()];
-    }
-    vec![
-        python_command(),
-        bridge_script_path().display().to_string(),
-    ]
-}
-
-fn python_command() -> String {
-    crate::platform::runtime_resolver::resolve_python_runtime()
-        .path
-        .display()
-        .to_string()
-}
-
-fn bridge_command(subcommand: &str, codex_home: &str) -> Vec<String> {
-    bridge_command_with_mode(subcommand, codex_home, None, None, false, false)
-}
-
-#[derive(Default)]
-struct RecoveryOptions<'a> {
-    include_archived: bool,
-    allow_missing_cwd: bool,
-    allow_empty_cwd: bool,
-    allow_missing_session: bool,
-    projectless_mode: Option<&'a str>,
-    unarchive_selected: bool,
-}
-
-fn append_recovery_options(command: &mut Vec<String>, options: RecoveryOptions<'_>) {
-    if options.include_archived {
-        command.push("--include-archived".to_string());
-    }
-    if options.allow_missing_cwd {
-        command.push("--allow-missing-cwd".to_string());
-    }
-    if options.allow_empty_cwd {
-        command.push("--allow-empty-cwd".to_string());
-    }
-    if options.allow_missing_session {
-        command.push("--allow-missing-session".to_string());
-    }
-    if let Some(projectless_mode) = options.projectless_mode {
-        command.push("--projectless-mode".to_string());
-        command.push(projectless_mode.to_string());
-    }
-    if options.unarchive_selected {
-        command.push("--unarchive-selected".to_string());
-    }
-}
-
-fn bridge_command_with_mode(
-    subcommand: &str,
-    codex_home: &str,
-    mode: Option<&str>,
-    provider_json: Option<&str>,
-    hide_official_quota_notice: bool,
-    restore_history: bool,
-) -> Vec<String> {
-    let mut command = bridge_command_prefix();
-    command.extend([
-        subcommand.to_string(),
-        "--codex-home".to_string(),
-        codex_home.to_string(),
-    ]);
-    if let Some(mode) = mode {
-        command.push("--mode".to_string());
-        command.push(mode.to_string());
-    }
-    if let Some(provider_json) = provider_json {
-        command.push("--provider-json".to_string());
-        command.push(provider_json.to_string());
-    }
-    if hide_official_quota_notice {
-        command.push("--hide-official-quota-notice".to_string());
-    }
-    if restore_history {
-        command.push("--restore-history".to_string());
-    }
-    command
-}
-
-fn bridge_command_with_recovery_options(
-    subcommand: &str,
-    codex_home: &str,
-    options: RecoveryOptions<'_>,
-) -> Vec<String> {
-    let mut command = bridge_command(subcommand, codex_home);
-    append_recovery_options(&mut command, options);
-    command
 }
 
 fn run_bridge_launch(
@@ -206,325 +40,12 @@ fn run_bridge_launch(
     run_bridge_command(command)
 }
 
-fn toml_string(table: &toml::Table, key: &str) -> String {
-    table
-        .get(key)
-        .and_then(toml::Value::as_str)
-        .map(str::trim)
-        .unwrap_or_default()
-        .to_string()
-}
-
-fn toml_bool(table: &toml::Table, key: &str) -> bool {
-    table
-        .get(key)
-        .and_then(toml::Value::as_bool)
-        .unwrap_or(false)
-}
-
-fn read_model_provider_from_config_contents(contents: &str) -> Option<String> {
-    for line in contents.lines() {
-        let stripped = line.trim();
-        if stripped.starts_with('#') || stripped.starts_with('[') {
-            continue;
-        }
-        let Some((key, value)) = stripped.split_once('=') else {
-            continue;
-        };
-        if key.trim() != "model_provider" {
-            continue;
-        }
-        let value = value.trim().trim_matches('"').trim();
-        if !value.is_empty() {
-            return Some(value.to_string());
-        }
-    }
-    None
-}
-
-fn parse_provider_profiles(raw: &str) -> Result<BTreeMap<String, ProviderProfile>, String> {
-    let payload = raw
-        .parse::<toml::Value>()
-        .map_err(|error| format!("Failed to parse config.toml: {error}"))?;
-    let mut profiles = BTreeMap::new();
-    let Some(provider_tables) = payload
-        .get("model_providers")
-        .and_then(toml::Value::as_table)
-    else {
-        return Ok(profiles);
-    };
-
-    for (key, value) in provider_tables {
-        let Some(table) = value.as_table() else {
-            continue;
-        };
-        let name = toml_string(table, "name");
-        let wire_api = toml_string(table, "wire_api");
-        profiles.insert(
-            key.to_string(),
-            ProviderProfile {
-                key: key.to_string(),
-                name: if name.is_empty() {
-                    key.to_string()
-                } else {
-                    name
-                },
-                base_url: toml_string(table, "base_url"),
-                wire_api: if wire_api.is_empty() {
-                    "responses".to_string()
-                } else {
-                    wire_api
-                },
-                env_key: toml_string(table, "env_key"),
-                requires_openai_auth: toml_bool(table, "requires_openai_auth"),
-                experimental_bearer_token: toml_string(table, "experimental_bearer_token"),
-            },
-        );
-    }
-    Ok(profiles)
-}
-
-fn push_candidate(candidates: &mut Vec<String>, key: Option<&str>) {
-    let Some(key) = key.map(str::trim).filter(|key| !key.is_empty()) else {
-        return;
-    };
-    if !candidates.iter().any(|candidate| candidate == key) {
-        candidates.push(key.to_string());
-    }
-}
-
-fn load_provider_profile_from_config(
-    codex_home: &Path,
-    mode: &str,
-) -> Result<ProviderProfile, String> {
-    let config_path = codex_home.join("config.toml");
-    let raw = std::fs::read_to_string(&config_path)
-        .map_err(|_| format!("Config file not found: {}", config_path.display()))?;
-    let current_provider = read_model_provider_from_config_contents(&raw);
-    let profiles = parse_provider_profiles(&raw)?;
-    if profiles.is_empty() {
-        return Err("No model provider profiles found in config.toml.".to_string());
-    }
-
-    let mut candidates = Vec::new();
-    if current_provider
-        .as_deref()
-        .map(|provider| !provider.eq_ignore_ascii_case("openai"))
-        .unwrap_or(false)
-    {
-        push_candidate(&mut candidates, current_provider.as_deref());
-    }
-    push_candidate(&mut candidates, Some("lac"));
-    push_candidate(&mut candidates, Some("cliproxy"));
-    for key in profiles.keys() {
-        if !key.eq_ignore_ascii_case("openai") {
-            push_candidate(&mut candidates, Some(key));
-        }
-    }
-
-    if mode == "hybrid" {
-        for key in &candidates {
-            let Some(profile) = profiles.get(key) else {
-                continue;
-            };
-            if profile.requires_openai_auth && !profile.experimental_bearer_token.trim().is_empty() {
-                return Ok(profile.clone());
-            }
-        }
-        return Err(
-            "No hybrid-capable provider found in config.toml. Expected requires_openai_auth=true and experimental_bearer_token."
-                .to_string(),
-        );
-    }
-
-    for key in &candidates {
-        if let Some(profile) = profiles.get(key) {
-            return Ok(profile.clone());
-        }
-    }
-
-    Err("No non-official provider found in config.toml for API launch mode.".to_string())
-}
-
-fn provider_json_for_launch(
-    codex_home: &str,
-    mode: Option<&str>,
-    provider_json: Option<&str>,
-) -> Result<Option<String>, String> {
-    if let Some(provider_json) = provider_json.map(str::trim).filter(|value| !value.is_empty()) {
-        return Ok(Some(provider_json.to_string()));
-    }
-    let Some(mode @ ("api" | "hybrid")) = mode else {
-        return Ok(None);
-    };
-    let profile = load_provider_profile_from_config(&normalize_codex_home(codex_home), mode)?;
-    serde_json::to_string(&profile)
-        .map(Some)
-        .map_err(|error| error.to_string())
-}
-
-fn reusable_hybrid_provider_key(codex_home: &Path) -> Option<String> {
-    load_provider_profile_from_config(codex_home, "hybrid")
-        .ok()
-        .map(|profile| profile.key)
-}
-
-fn toml_quoted(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-fn upsert_model_provider(raw: &str, provider: &str) -> String {
-    let provider_line = format!("model_provider = \"{}\"", toml_quoted(provider));
-    let mut output = Vec::new();
-    let mut replaced = false;
-    let mut inserted_after_reasoning = false;
-    let mut in_root = true;
-
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') {
-            in_root = false;
-        }
-        if in_root && trimmed.starts_with("model_provider") && trimmed.contains('=') {
-            output.push(provider_line.clone());
-            replaced = true;
-            continue;
-        }
-        output.push(line.to_string());
-        if !replaced
-            && in_root
-            && trimmed.starts_with("model_reasoning_effort")
-            && trimmed.contains('=')
-        {
-            output.push(provider_line.clone());
-            inserted_after_reasoning = true;
-        }
-    }
-
-    if !replaced && !inserted_after_reasoning {
-        output.insert(0, provider_line);
-    }
-    let mut updated = output.join("\n");
-    if raw.ends_with('\n') || !updated.ends_with('\n') {
-        updated.push('\n');
-    }
-    updated
-}
-
-fn provider_block(profile: &ProviderProfile) -> String {
-    let mut lines = vec![
-        format!("[model_providers.{}]", profile.key),
-        format!("name = \"{}\"", toml_quoted(&profile.name)),
-        format!("base_url = \"{}\"", toml_quoted(&profile.base_url)),
-        format!("wire_api = \"{}\"", toml_quoted(&profile.wire_api)),
-    ];
-    if profile.requires_openai_auth {
-        lines.push("requires_openai_auth = true".to_string());
-        let token = profile.experimental_bearer_token.trim();
-        if !token.is_empty() {
-            lines.push(format!(
-                "experimental_bearer_token = \"{}\"",
-                toml_quoted(token)
-            ));
-        }
-    } else {
-        let env_key = profile.env_key.trim();
-        if !env_key.is_empty() {
-            lines.push(format!("env_key = \"{}\"", toml_quoted(env_key)));
-        }
-        lines.push("supports_websockets = false".to_string());
-    }
-    lines.join("\n") + "\n"
-}
-
-fn table_range(raw: &str, header: &str) -> Option<(usize, usize)> {
-    let mut start = None;
-    let mut offset = 0;
-    for segment in raw.split_inclusive('\n') {
-        let trimmed = segment.trim();
-        if start.is_some() && trimmed.starts_with('[') {
-            return Some((start.unwrap(), offset));
-        }
-        if trimmed == header {
-            start = Some(offset);
-        }
-        offset += segment.len();
-    }
-    if start.is_some() {
-        return Some((start.unwrap(), raw.len()));
-    }
-    None
-}
-
-fn upsert_provider_block(raw: &str, profile: &ProviderProfile) -> String {
-    let block = provider_block(profile);
-    let header = format!("[model_providers.{}]", profile.key);
-    if let Some((start, end)) = table_range(raw, &header) {
-        return format!("{}{}{}", &raw[..start], block, &raw[end..]);
-    }
-
-    let mut updated = raw.to_string();
-    if !updated.ends_with('\n') {
-        updated.push('\n');
-    }
-    updated.push('\n');
-    updated.push_str(&block);
-    updated
-}
-
-fn configure_provider_for_launch(
-    codex_home: &Path,
-    mode: &str,
-    profile: Option<&ProviderProfile>,
-) -> Result<ProviderConfigResult, String> {
-    let config_path = codex_home.join("config.toml");
-    let raw = std::fs::read_to_string(&config_path)
-        .map_err(|_| format!("Config file not found: {}", config_path.display()))?;
-    let backup_path = config_path.with_file_name(format!(
-        "config.toml.backup_ai_manager_{}",
-        chrono::Local::now().format("%Y%m%d-%H%M%S")
-    ));
-    std::fs::write(&backup_path, &raw).map_err(|error| error.to_string())?;
-
-    let (target, updated) = match mode {
-        "official" => ("openai".to_string(), upsert_model_provider(&raw, "openai")),
-        "api" | "hybrid" => {
-            let Some(profile) = profile else {
-                return Err("Provider profile is required for API launch mode.".to_string());
-            };
-            if mode == "hybrid" {
-                if !profile.requires_openai_auth {
-                    return Err("Hybrid mode requires requires_openai_auth=true.".to_string());
-                }
-                if profile.experimental_bearer_token.trim().is_empty() {
-                    return Err("Hybrid mode requires experimental_bearer_token.".to_string());
-                }
-            }
-            let updated = upsert_provider_block(&upsert_model_provider(&raw, &profile.key), profile);
-            (profile.key.clone(), updated)
-        }
-        other => return Err(format!("Unsupported launch mode: {other}")),
-    };
-
-    std::fs::write(&config_path, updated).map_err(|error| error.to_string())?;
-    let verified_raw = std::fs::read_to_string(&config_path).map_err(|error| error.to_string())?;
-    let verified_provider = read_model_provider_from_config_contents(&verified_raw);
-    if verified_provider.as_deref() != Some(target.as_str()) {
-        return Err(format!(
-            "Config verification failed: expected model_provider={target}, got {verified_provider:?}"
-        ));
-    }
-
-    Ok(ProviderConfigResult {
-        config_path: config_path.display().to_string(),
-        backup_path: Some(backup_path.display().to_string()),
-        mode: mode.to_string(),
-        target_model_provider: target.clone(),
-        verified_model_provider: target,
-    })
+fn run_bridge_enhanced_launch(codex_home: &str) -> Result<Value, String> {
+    run_bridge_command(bridge_command("enhanced-launch", codex_home))
 }
 
 fn run_bridge_command(command: Vec<String>) -> Result<Value, String> {
+    append_prelaunch_log(&format!("bridge_command_start command={}", redact_command(&command)));
     let mut process = Command::new(&command[0]);
     process.args(&command[1..]);
     #[cfg(target_os = "windows")]
@@ -536,15 +57,71 @@ fn run_bridge_command(command: Vec<String>) -> Result<Value, String> {
         process.env(key, value);
     }
 
-    let output = process.output().map_err(|error| error.to_string())?;
+    let output = process.output().map_err(|error| {
+        append_prelaunch_log(&format!("bridge_command_spawn_failed error={error}"));
+        error.to_string()
+    })?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    append_prelaunch_log(&format!(
+        "bridge_command_exit status={} stdout={} stderr={}",
+        output.status,
+        truncate_for_log(&stdout, 4000),
+        truncate_for_log(&stderr, 4000)
+    ));
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         return Err(if !stderr.is_empty() { stderr } else { stdout });
     }
 
-    serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+    let payload: Value = serde_json::from_slice(&output.stdout).map_err(|error| {
+        append_prelaunch_log(&format!("bridge_command_parse_failed error={error}"));
+        error.to_string()
+    })?;
+    append_prelaunch_log(&format!(
+        "bridge_command_payload {}",
+        truncate_for_log(&payload.to_string(), 4000)
+    ));
+    Ok(payload)
+}
+
+fn append_prelaunch_log(message: &str) {
+    let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") else {
+        return;
+    };
+    let log_dir = PathBuf::from(local_app_data)
+        .join("AI-Strategist")
+        .join("logs");
+    if std::fs::create_dir_all(&log_dir).is_err() {
+        return;
+    }
+    let log_path = log_dir.join("prelaunch-command.log");
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
+        let _ = writeln!(file, "[{timestamp}] {message}");
+    }
+}
+
+fn truncate_for_log(value: &str, max_chars: usize) -> String {
+    let mut truncated: String = value.chars().take(max_chars).collect();
+    if value.chars().count() > max_chars {
+        truncated.push_str("...<truncated>");
+    }
+    truncated
+}
+
+fn redact_command(command: &[String]) -> String {
+    command
+        .iter()
+        .map(|part| {
+            if part.contains("api_key") || part.contains("OPENAI_API_KEY") || part.contains("experimental_bearer_token") {
+                "<redacted>".to_string()
+            } else {
+                part.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn run_bridge_repair(
@@ -729,6 +306,27 @@ fn is_runtime_helper_process(process: &Value) -> bool {
             || exe.ends_with("\\codex\\codex.exe"))
 }
 
+fn is_codex_desktop_process(process: &Value) -> bool {
+    let image = process
+        .get("image")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let exe = process
+        .get("exe")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .replace("/", "\\")
+        .to_lowercase();
+
+    image.eq_ignore_ascii_case("Codex.exe")
+        && exe.contains("\\windowsapps\\openai.codex_")
+        && exe.ends_with("\\app\\codex.exe")
+}
+
+fn is_managed_codex_process(process: &Value) -> bool {
+    is_runtime_helper_process(process) || is_codex_desktop_process(process)
+}
+
 fn codex_running_processes_from_rust() -> Vec<Value> {
     let mut processes = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -801,7 +399,7 @@ fn taskkill_args(pid: i64) -> Vec<String> {
 fn terminate_codex_processes_from_rust(timeout_seconds: f64) -> Value {
     let processes = codex_running_processes_from_rust()
         .into_iter()
-        .filter(is_runtime_helper_process)
+        .filter(is_managed_codex_process)
         .filter(|process| process.get("pid").and_then(Value::as_i64).is_some())
         .collect::<Vec<_>>();
     let mut killed = Vec::new();
@@ -844,13 +442,13 @@ fn terminate_codex_processes_from_rust(timeout_seconds: f64) -> Value {
         std::time::Instant::now() + std::time::Duration::from_secs_f64(timeout_seconds.max(0.0));
     let mut remaining = codex_running_processes_from_rust()
         .into_iter()
-        .filter(is_runtime_helper_process)
+        .filter(is_managed_codex_process)
         .collect::<Vec<_>>();
     while !remaining.is_empty() && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(200));
         remaining = codex_running_processes_from_rust()
             .into_iter()
-            .filter(is_runtime_helper_process)
+            .filter(is_managed_codex_process)
             .collect::<Vec<_>>();
     }
 
@@ -916,6 +514,98 @@ fn prelaunch_status_payload(codex_home: &str) -> Value {
     })
 }
 
+fn prelaunch_environment_payload(codex_home: &str) -> Value {
+    let codex_home = normalize_codex_home(codex_home);
+    let config_path = codex_home.join("config.toml");
+    let auth_path = codex_home.join("auth.json");
+    let state_path = codex_home.join("state_5.sqlite");
+    let bridge_program = bridge_program_path();
+    let bridge_script = bridge_script_path();
+    let bridge_exe = bridge_exe_path();
+    let runtime = prelaunch_runtime_status_payload();
+    let python = crate::platform::runtime_resolver::resolve_python_runtime();
+    let threadripper = resolved_threadripper_runtime();
+    let codex_desktop = crate::platform::runtime_resolver::resolve_codex_desktop_exe();
+    let codex_desktop_path = codex_desktop
+        .as_ref()
+        .map(|runtime| runtime.path.display().to_string());
+    let codex_desktop_source = codex_desktop.as_ref().map(|runtime| runtime.source.as_str());
+    let codex_running = runtime
+        .get("codex_running")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let codex_launch_available = bridge_program.is_some() && codex_desktop.is_some();
+    let config_model_provider = read_model_provider_from_codex_config(&codex_home);
+    let hybrid_provider_key = reusable_hybrid_provider_key(&codex_home);
+    let auth_mode = read_auth_mode_from_codex_home(&codex_home);
+
+    let mut blockers = Vec::new();
+    let mut warnings = Vec::new();
+
+    if !codex_home_exists(&codex_home) {
+        blockers.push("codex_home_missing");
+    }
+    if bridge_program.is_none() {
+        blockers.push("prelaunch_bridge_missing");
+    }
+    if !codex_launch_available {
+        blockers.push("codex_desktop_not_found");
+    }
+    if !config_path.exists() {
+        warnings.push("config_missing");
+    }
+    if auth_mode.is_none() {
+        warnings.push("auth_missing");
+    }
+    if threadripper.is_none() {
+        warnings.push("threadripper_unavailable");
+    }
+    if hybrid_provider_key.is_none() {
+        warnings.push("hybrid_provider_missing");
+    }
+
+    json!({
+        "ok": blockers.is_empty(),
+        "codexHome": path_status(&codex_home),
+        "config": {
+            "path": config_path.display().to_string(),
+            "exists": config_path.exists(),
+            "modelProvider": config_model_provider,
+            "hybridProviderConfigured": hybrid_provider_key.is_some(),
+            "hybridProviderKey": hybrid_provider_key,
+            "authMode": auth_mode,
+            "authPath": path_status(&auth_path),
+            "statePath": path_status(&state_path),
+        },
+        "bridge": {
+            "programPath": bridge_program.as_ref().map(|path| path.display().to_string()),
+            "scriptPath": bridge_script.display().to_string(),
+            "exePath": bridge_exe.as_ref().map(|path| path.display().to_string()),
+            "usesExe": bridge_exe.is_some(),
+            "available": bridge_program.is_some(),
+        },
+        "runtimes": {
+            "python": {
+                "path": python.path.display().to_string(),
+                "source": python.source.as_str(),
+            },
+            "threadripper": threadripper.as_ref().map(|runtime| runtime.path.display().to_string()),
+            "threadripperAvailable": threadripper.is_some(),
+        },
+        "codexDesktop": {
+            "productResolvedExe": codex_desktop_path,
+            "productResolvedSource": codex_desktop_source,
+            "appid": null,
+            "lastResortExe": null,
+            "launchAvailable": codex_launch_available,
+            "running": codex_running,
+        },
+        "runtime": runtime,
+        "blockers": blockers,
+        "warnings": warnings,
+    })
+}
+
 fn bridge_runtime_environment() -> Vec<(&'static str, String)> {
     let mut values = Vec::new();
     let python = crate::platform::runtime_resolver::resolve_python_runtime();
@@ -967,29 +657,6 @@ fn bridge_runtime_environment() -> Vec<(&'static str, String)> {
     values
 }
 
-fn read_model_provider_from_codex_config(codex_home: &Path) -> String {
-    let config_path = codex_home.join("config.toml");
-    let Ok(contents) = std::fs::read_to_string(config_path) else {
-        return "openai".to_string();
-    };
-
-    for line in contents.lines() {
-        let stripped = line.trim();
-        if !stripped.starts_with("model_provider") || !stripped.contains('=') {
-            continue;
-        }
-        let Some((_, value)) = stripped.split_once('=') else {
-            continue;
-        };
-        let value = value.trim().trim_matches('"').trim();
-        if !value.is_empty() {
-            return value.to_string();
-        }
-    }
-
-    "openai".to_string()
-}
-
 fn codex_plus_read_only_status(codex_home: &Path) -> Value {
     let relay = codex_plus_core::relay_config::relay_status_from_home(codex_home);
     serde_json::json!({
@@ -1004,6 +671,11 @@ fn codex_plus_read_only_status(codex_home: &Path) -> Value {
 #[tauri::command]
 pub fn prelaunch_status(codex_home: String) -> Result<Value, String> {
     Ok(prelaunch_status_payload(&codex_home))
+}
+
+#[tauri::command]
+pub fn prelaunch_environment(codex_home: String) -> Result<Value, String> {
+    Ok(prelaunch_environment_payload(&codex_home))
 }
 
 #[tauri::command]
@@ -1035,6 +707,11 @@ pub fn prelaunch_launch(
 }
 
 #[tauri::command]
+pub fn prelaunch_enhanced_launch(codex_home: String) -> Result<Value, String> {
+    run_bridge_enhanced_launch(&codex_home)
+}
+
+#[tauri::command]
 pub fn prelaunch_repair(
     codex_home: String,
     include_archived: Option<bool>,
@@ -1057,10 +734,17 @@ pub fn prelaunch_repair(
 
 #[cfg(test)]
 mod tests {
-    use super::{
+    use super::super::prelaunch_bridge::{
         bridge_command, bridge_command_with_mode, bridge_command_with_recovery_options,
-        bridge_runtime_environment, bridge_script_path, bundled_bridge_candidates, python_command,
-        repo_root_from_manifest, resolved_threadripper_env_value, RecoveryOptions,
+        bridge_script_path, bundled_bridge_candidates, python_command, repo_root_from_manifest,
+        RecoveryOptions,
+    };
+    use super::super::prelaunch_provider::{
+        configure_provider_for_launch, load_provider_profile_from_config, provider_json_for_launch,
+        ProviderProfile,
+    };
+    use super::{
+        bridge_runtime_environment, resolved_threadripper_env_value,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -1297,7 +981,7 @@ env_key = "CUSTOM_KEY"
         )
         .expect("config");
 
-        let profile = super::load_provider_profile_from_config(&temp_root, "api")
+        let profile = load_provider_profile_from_config(&temp_root, "api")
             .expect("provider profile");
 
         let _ = fs::remove_dir_all(&temp_root);
@@ -1335,7 +1019,7 @@ env_key = "LAC_KEY"
         )
         .expect("config");
 
-        let profile = super::load_provider_profile_from_config(&temp_root, "api")
+        let profile = load_provider_profile_from_config(&temp_root, "api")
             .expect("provider profile");
 
         let _ = fs::remove_dir_all(&temp_root);
@@ -1370,7 +1054,7 @@ experimental_bearer_token = "sk-test"
         )
         .expect("config");
 
-        let profile = super::load_provider_profile_from_config(&temp_root, "hybrid")
+        let profile = load_provider_profile_from_config(&temp_root, "hybrid")
             .expect("provider profile");
 
         let _ = fs::remove_dir_all(&temp_root);
@@ -1394,7 +1078,7 @@ model_provider = "openai"
 "#,
         )
         .expect("config");
-        let profile = super::ProviderProfile {
+        let profile = ProviderProfile {
             key: "lac".to_string(),
             name: "LAC".to_string(),
             base_url: "https://lac.example.test/v1".to_string(),
@@ -1404,7 +1088,7 @@ model_provider = "openai"
             experimental_bearer_token: "".to_string(),
         };
 
-        let result = super::configure_provider_for_launch(&temp_root, "api", Some(&profile))
+        let result = configure_provider_for_launch(&temp_root, "api", Some(&profile))
             .expect("configured provider");
         let updated = fs::read_to_string(temp_root.join("config.toml")).expect("updated config");
 
@@ -1429,7 +1113,7 @@ model_provider = "openai"
         fs::create_dir_all(&temp_root).expect("temp root");
         fs::write(temp_root.join("config.toml"), r#"model_provider = "openai""#)
             .expect("config");
-        let profile = super::ProviderProfile {
+        let profile = ProviderProfile {
             key: "CodexPlusPlus".to_string(),
             name: "CodexPlusPlus".to_string(),
             base_url: "https://relay.example.test/v1".to_string(),
@@ -1439,7 +1123,7 @@ model_provider = "openai"
             experimental_bearer_token: "".to_string(),
         };
 
-        let result = super::configure_provider_for_launch(&temp_root, "hybrid", Some(&profile));
+        let result = configure_provider_for_launch(&temp_root, "hybrid", Some(&profile));
 
         let _ = fs::remove_dir_all(&temp_root);
         assert_eq!(
@@ -1450,7 +1134,7 @@ model_provider = "openai"
 
 
     #[test]
-    fn enhanced_relay_launch_can_reuse_saved_hybrid_provider_json() {
+    fn enhanced_relay_launch_does_not_build_provider_json() {
         let temp_root = std::env::temp_dir().join(format!(
             "ai-strategist-enhanced-reuse-provider-test-{}",
             std::process::id()
@@ -1471,20 +1155,15 @@ experimental_bearer_token = "sk-test"
         )
         .expect("config");
 
-        let provider_json = super::provider_json_for_launch(
+        let provider_json = provider_json_for_launch(
             &temp_root.display().to_string(),
             Some("hybrid"),
             None,
         )
-        .expect("provider json")
-        .expect("provider json present");
+        .expect("hybrid enhanced launch should not validate provider config");
 
         let _ = fs::remove_dir_all(&temp_root);
-        let payload: serde_json::Value = serde_json::from_str(&provider_json).expect("json");
-        assert_eq!(payload["key"], "codexzh");
-        assert_eq!(payload["base_url"], "https://api.codexzh.com/v1");
-        assert_eq!(payload["requires_openai_auth"], true);
-        assert_eq!(payload["experimental_bearer_token"], "sk-test");
+        assert!(provider_json.is_none());
     }
 
     #[test]

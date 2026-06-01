@@ -10,7 +10,7 @@ from typing import Callable
 def resolved_codex_desktop_exe(env: dict[str, str] | None = None) -> str | None:
     source = env or os.environ
     resolved = source.get("AI_STRATEGIST_CODEX_DESKTOP")
-    if resolved and Path(resolved).exists() and not is_windowsapps_codex_path(resolved):
+    if resolved and Path(resolved).exists():
         return resolved
     return None
 

@@ -78,7 +78,8 @@ describe("renderer one-click handoff submit helpers", () => {
     document.body.appendChild(form);
     internals.setComposerValue(composer, "handoff prompt");
     const clicked = vi.fn();
-    send.addEventListener("click", () => {
+    send.addEventListener("click", (event) => {
+      event.preventDefault();
       clicked();
       composer.value = "";
     });

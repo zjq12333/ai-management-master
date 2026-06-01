@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Database, KeyRound, Rocket, ShieldCheck, Wrench } from "lucide-react";
+import { CheckCircle2, Database, KeyRound, Rocket, ShieldCheck } from "lucide-react";
 
 import { BentoCard } from "@/components/ui/bento-card";
 import { Button } from "@/components/ui/button";
@@ -19,11 +19,11 @@ import {
 import { api } from "@/lib/api";
 import type { EnhancerSettingsPayload } from "@/types/enhancer";
 import type {
+  PrelaunchEnvironmentPayload,
   PrelaunchLaunchPayload,
   PrelaunchMode,
   PrelaunchProviderPayload,
   PrelaunchRecoveryOptionsPayload,
-  PrelaunchStopRuntimePayload,
   PrelaunchThreadAttributionPayload,
   PrelaunchStatusPayload,
 } from "@/types/prelaunch";
@@ -38,13 +38,17 @@ function getDefaultCodexHome() {
 
 export const DEFAULT_CODEX_HOME = getDefaultCodexHome();
 
-const launchModes: { mode: PrelaunchMode; title: string; desc: string }[] = [
-  { mode: "official", title: "打开 Codex", desc: "普通用户入口。只打开 Codex；如果 Codex 已经在运行，就不会关闭、聚焦或重复启动。" },
+const launchModes: LaunchCard[] = [
   { mode: "api", title: "API 供应商启动", desc: "使用第三方 API / Relay provider 启动，适合纯 API 通道。" },
-  { mode: "hybrid", title: "混合登录", desc: "官方账号 + API（第三方也行）同时登录，保持插件等原生功能。" },
+  { mode: "hybrid", title: "混合登录启动", desc: "第一次配置官方账号 + API 时使用，需要填写 Provider 信息。" },
+  { mode: "enhanced", title: "增强启动", desc: "启动已登录的 Codex，并加载插件和增强功能。" },
 ];
 
+type LaunchCardMode = Exclude<PrelaunchMode, "official"> | "enhanced";
+type RunningAction = PrelaunchMode | LaunchCardMode | "repair";
+
 type PendingRuntimeAction =
+  | { type: "enhanced-launch" }
   | { type: "launch"; mode: PrelaunchMode; hideOfficialQuotaNotice: boolean; restoreHistory: boolean; provider: PrelaunchProviderPayload | null }
   | { type: "repair"; recoveryOptions?: PrelaunchRecoveryOptionsPayload };
 
@@ -53,6 +57,12 @@ type LaunchMutationVars = {
   provider: PrelaunchProviderPayload | null;
   hideOfficialQuotaNotice: boolean;
   restoreHistory: boolean;
+};
+
+type LaunchCard = {
+  mode: LaunchCardMode;
+  title: string;
+  desc: string;
 };
 
 type RepairMutationVars = PrelaunchRecoveryOptionsPayload | undefined;
@@ -127,42 +137,13 @@ function buildProviderPayload(mode: PrelaunchMode, draft: ProviderDraft): Prelau
   };
 }
 
-function hasOfficialLogin(status?: PrelaunchStatusPayload): boolean {
-  const authMode = status?.evidence?.auth_mode?.trim().toLowerCase();
-  return status?.codexPlus?.relay?.authenticated === true || authMode === "chatgpt";
-}
-
-function hasReusableHybridProvider(status?: PrelaunchStatusPayload): boolean {
-  const evidence = status?.evidence;
-  if (evidence?.hybrid_provider_configured) return true;
-  const relay = status?.codexPlus?.relay;
-  if (relay?.configured && relay.requiresOpenaiAuth && relay.hasBearerToken) return true;
-
-  const provider = evidence?.config_model_provider?.trim().toLowerCase();
-  return !!provider && provider !== "openai" && evidence?.auth_mode?.trim().toLowerCase() === "chatgpt";
-}
-
-function enhancedLoginReadinessMessage(status?: PrelaunchStatusPayload): string | null {
-  if (!status) return "正在读取登录状态，请稍后再试。";
-  const hasOfficial = hasOfficialLogin(status);
-  const hasHybridProvider = hasReusableHybridProvider(status);
-  if (hasOfficial && hasHybridProvider) return null;
-  if (hasOfficial) {
-    return "增强登录需要先保存混合登录信息：当前只检测到官方账号，请先使用混合登录填写 Relay/API 信息。";
-  }
-  if (hasHybridProvider) {
-    return "增强登录需要官方账号和 Relay/API 混合信息：当前只检测到 Relay/API 配置，请先完成官方账号登录并用混合登录保存一次。";
-  }
-  return "增强登录需要先完成混合登录：请先登录官方账号，并在混合登录里保存 Relay/API 信息。";
-}
-
 export function LoginRepairPage() {
   const [runningWarningOpen, setRunningWarningOpen] = useState(false);
   const [runningProcessLabel, setRunningProcessLabel] = useState("");
   const [pendingRuntimeAction, setPendingRuntimeAction] = useState<PendingRuntimeAction | null>(null);
-  const [stopRuntimeError, setStopRuntimeError] = useState<string | null>(null);
   const [runtimeSafetyNotice, setRuntimeSafetyNotice] = useState<string | null>(null);
   const [codexRunning, setCodexRunning] = useState<boolean | null>(null);
+  const [stoppingRuntime, setStoppingRuntime] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [activeProviderMode, setActiveProviderMode] = useState<PrelaunchMode | null>(null);
   const [providerDraft, setProviderDraft] = useState<ProviderDraft>(defaultProviderDraft);
@@ -174,6 +155,10 @@ export function LoginRepairPage() {
     queryKey: ["prelaunch-status", DEFAULT_CODEX_HOME],
     queryFn: () => api.prelaunchStatus(DEFAULT_CODEX_HOME),
   });
+  const environmentQuery = useQuery<PrelaunchEnvironmentPayload>({
+    queryKey: ["prelaunch-environment", DEFAULT_CODEX_HOME],
+    queryFn: () => api.prelaunchEnvironment(DEFAULT_CODEX_HOME),
+  });
   const enhancerSettingsQuery = useQuery<EnhancerSettingsPayload>({
     queryKey: ["enhancer-settings"],
     queryFn: () => api.getEnhancerSettings(),
@@ -182,22 +167,25 @@ export function LoginRepairPage() {
     mutationFn: ({ mode, provider, hideOfficialQuotaNotice, restoreHistory }) =>
       api.prelaunchLaunch(DEFAULT_CODEX_HOME, mode, provider, hideOfficialQuotaNotice, restoreHistory),
   });
+  const enhancedLaunchMutation = useMutation<PrelaunchLaunchPayload, Error>({
+    mutationFn: () => api.prelaunchEnhancedLaunch(DEFAULT_CODEX_HOME),
+  });
   const repairMutation = useMutation<PrelaunchLaunchPayload, Error, RepairMutationVars>({
     mutationFn: (options) =>
       options ? api.prelaunchRepair(DEFAULT_CODEX_HOME, options) : api.prelaunchRepair(DEFAULT_CODEX_HOME),
   });
-  const stopRuntimeMutation = useMutation({
-    mutationFn: () => api.prelaunchStopRuntime(),
-  });
-
   const evidence = statusQuery.data?.evidence;
   const hideOfficialQuotaNotice = enhancerSettingsQuery.data?.hideOfficialQuotaNoticeEnabled ?? false;
   const providerBuckets = Object.keys(evidence?.provider_distribution ?? {});
-  const latestResult = repairMutation.data ?? launchMutation.data;
-  const runningMode = launchMutation.variables?.mode;
+  const latestResult = repairMutation.data ?? enhancedLaunchMutation.data ?? launchMutation.data;
+  const [runningAction, setRunningAction] = useState<RunningAction | null>(null);
 
   const executePendingAction = (action: PendingRuntimeAction) => {
-    if (action.type === "launch") {
+    if (action.type === "enhanced-launch") {
+      setRunningAction("enhanced");
+      enhancedLaunchMutation.mutate();
+    } else if (action.type === "launch") {
+      setRunningAction(action.provider == null && action.mode === "hybrid" ? "enhanced" : action.mode);
       launchMutation.mutate({
         mode: action.mode,
         provider: action.provider,
@@ -205,6 +193,7 @@ export function LoginRepairPage() {
         restoreHistory: action.restoreHistory,
       });
     } else {
+      setRunningAction("repair");
       repairMutation.mutate(action.recoveryOptions);
     }
   };
@@ -227,21 +216,18 @@ export function LoginRepairPage() {
   const checkRuntimeReady = async (action: PendingRuntimeAction) => {
     const runtime = await api.prelaunchRuntimeStatus();
     setCodexRunning(runtime.codex_running);
+    if (action.type === "launch") {
+      setRuntimeSafetyNotice(null);
+      return true;
+    }
     if (runtime.codex_running) {
       const processLabel = runtime.processes
         .map((process) => [process.image, process.pid == null ? null : `PID ${process.pid}`].filter(Boolean).join(" "))
         .filter(Boolean)
         .slice(0, 8)
         .join("、");
-      if (action.type === "launch") {
-        setRuntimeSafetyNotice(
-          `检测到 ${processLabel || "已有 Codex 进程"}。如果 Codex 窗口能正常使用，不需要再操作；如果卡住或打不开，请点“重启并打开 Codex”。`,
-        );
-        return false;
-      }
       setRuntimeSafetyNotice(null);
       setPendingRuntimeAction(action);
-      setStopRuntimeError(null);
       setRunningProcessLabel(processLabel);
       setRunningWarningOpen(true);
       return false;
@@ -254,6 +240,7 @@ export function LoginRepairPage() {
     const validationError = validateProvider(mode, providerDraft);
     if (validationError) {
       setProviderError(validationError);
+      setRunningAction(null);
       return;
     }
     setProviderError(null);
@@ -266,62 +253,76 @@ export function LoginRepairPage() {
     };
     if (await checkRuntimeReady(action)) {
       executePendingAction(action);
+    } else {
+      setRunningAction(null);
     }
   };
 
   const launchEnhancedWithRuntimeCheck = async () => {
-    const readinessError = enhancedLoginReadinessMessage(statusQuery.data);
-    if (readinessError) {
-      setActiveProviderMode(null);
-      setProviderError(readinessError);
-      return;
-    }
     setProviderError(null);
-    const action: PendingRuntimeAction = {
-      type: "launch",
-      mode: "hybrid",
-      provider: null,
-      hideOfficialQuotaNotice,
-      restoreHistory: false,
-    };
+    setActiveProviderMode(null);
+    const action: PendingRuntimeAction = { type: "enhanced-launch" };
     if (await checkRuntimeReady(action)) {
       executePendingAction(action);
+    } else {
+      setRunningAction(null);
     }
   };
 
   const repairWithRuntimeCheck = async () => {
+    setRunningAction("repair");
     const action: PendingRuntimeAction = { type: "repair", recoveryOptions: activeRecoveryOptions() };
     if (await checkRuntimeReady(action)) {
       executePendingAction(action);
+    } else {
+      setRunningAction(null);
     }
   };
 
   const closeRuntimeWarning = () => {
     setRunningWarningOpen(false);
     setPendingRuntimeAction(null);
-    setStopRuntimeError(null);
   };
 
-  const stopAndContinue = async () => {
+  const stopRuntimeAndContinue = async () => {
     if (!pendingRuntimeAction) return;
-    setStopRuntimeError(null);
-    try {
-      const result = await stopRuntimeMutation.mutateAsync();
-      if (!result.ok) {
-        setStopRuntimeError(buildStopRuntimeError(result));
-        return;
-      }
-      const action = pendingRuntimeAction;
-      setRunningWarningOpen(false);
-      setPendingRuntimeAction(null);
-      executePendingAction(action);
-    } catch (error) {
-      setStopRuntimeError(error instanceof Error ? error.message : "关闭 Codex 失败");
+    const action = pendingRuntimeAction;
+    setStoppingRuntime(true);
+    const stopResult = await api.prelaunchStopRuntime();
+    setStoppingRuntime(false);
+    if (!stopResult.ok || stopResult.remaining.length > 0) {
+      const remainingLabel = stopResult.remaining
+        .map((process) => [process.image, process.pid == null ? null : `PID ${process.pid}`].filter(Boolean).join(" "))
+        .filter(Boolean)
+        .slice(0, 8)
+        .join("、");
+      const errorLabel = stopResult.errors?.filter(Boolean).join("；");
+      setRuntimeSafetyNotice(
+        remainingLabel
+          ? `仍有 Codex 运行时未退出：${remainingLabel}`
+          : errorLabel || "未能停止正在运行的 Codex，请手动退出后再试。",
+      );
+      return;
     }
+    const runtime = await api.prelaunchRuntimeStatus();
+    setCodexRunning(runtime.codex_running);
+    if (runtime.codex_running) {
+      const processLabel = runtime.processes
+        .map((process) => [process.image, process.pid == null ? null : `PID ${process.pid}`].filter(Boolean).join(" "))
+        .filter(Boolean)
+        .slice(0, 8)
+        .join("、");
+      setRunningProcessLabel(processLabel);
+      return;
+    }
+    setRunningWarningOpen(false);
+    setPendingRuntimeAction(null);
+    executePendingAction(action);
   };
 
-  const handleLaunchClick = (mode: PrelaunchMode) => {
-    if (mode === "official") {
+  const handleLaunchClick = (mode: LaunchCardMode) => {
+    setRunningAction(mode);
+    if (mode === "enhanced") {
       void launchEnhancedWithRuntimeCheck();
       return;
     }
@@ -337,20 +338,13 @@ export function LoginRepairPage() {
     }
   };
 
-  const handlePrimaryAction = async () => {
-    if (codexRunning) {
-      await repairWithRuntimeCheck();
-      return;
-    }
-    await launchEnhancedWithRuntimeCheck();
-  };
-
   const submitProviderLaunch = () => {
     if (!activeProviderMode) return;
+    setRunningAction(activeProviderMode);
     void launchWithRuntimeCheck(activeProviderMode);
   };
 
-  const providerDisabled = launchMutation.isPending || repairMutation.isPending;
+  const providerDisabled = launchMutation.isPending || enhancedLaunchMutation.isPending || repairMutation.isPending || stoppingRuntime;
   const requiresOpenaiAuth = activeProviderMode === "hybrid" || providerDraft.requiresOpenaiAuth;
   const activeProviderTitle =
     activeProviderMode === "api"
@@ -361,22 +355,24 @@ export function LoginRepairPage() {
 
   return (
     <div className="space-y-6">
-      <BentoCard>
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-lg font-semibold">
-              <Rocket className="h-5 w-5 text-primary" />
-              Codex 启动器
-            </div>
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              普通用户只需要点这里。若 Codex 没开，会打开 Codex；若检测到后台残留，会走“重启并打开”流程。
-            </p>
-          </div>
-          <Button className="min-w-44" disabled={providerDisabled} onClick={() => void handlePrimaryAction()}>
-            {repairMutation.isPending || launchMutation.isPending ? "处理中..." : codexRunning ? "重启并打开 Codex" : "启动 Codex"}
-          </Button>
-        </div>
-      </BentoCard>
+      <div className="grid gap-4 lg:grid-cols-3">
+        {launchModes.map(({ mode, title, desc }) => (
+          <ActionCard
+            key={mode}
+            title={title}
+            desc={desc}
+            icon={Rocket}
+            busy={(mode === "enhanced" ? enhancedLaunchMutation.isPending : launchMutation.isPending) && runningAction === mode}
+            disabled={providerDisabled}
+            actionLabel={mode === "api" || mode === "hybrid" ? "填写信息" : codexRunning ? "加载增强" : "启动并加载"}
+            busyLabel="启动中..."
+            onClick={() => handleLaunchClick(mode)}
+          />
+        ))}
+      </div>
+
+      {environmentQuery.data ? <EnvironmentCard environment={environmentQuery.data} /> : null}
+      {environmentQuery.isError ? <ErrorCard title="环境自检失败" error={environmentQuery.error} /> : null}
 
       {providerError && !activeProviderMode ? (
         <BentoCard>
@@ -393,39 +389,7 @@ export function LoginRepairPage() {
         </BentoCard>
       ) : null}
 
-      <BentoCard>
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="text-sm font-semibold">高级选项</div>
-            <p className="mt-1 text-sm leading-5 text-muted-foreground">只有需要第三方 API、混合登录或恢复历史时才打开。</p>
-          </div>
-          <Button variant="outline" onClick={() => setAdvancedOpen((open) => !open)}>
-            {advancedOpen ? "收起高级选项" : "显示高级选项"}
-          </Button>
-        </div>
-      </BentoCard>
-
-      {advancedOpen ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {launchModes
-            .filter(({ mode }) => mode !== "official")
-            .map(({ mode, title, desc }) => (
-              <ActionCard
-                key={mode}
-                title={title}
-                desc={desc}
-                icon={Rocket}
-                busy={launchMutation.isPending && runningMode === mode}
-                disabled={providerDisabled}
-                actionLabel="填写信息"
-                busyLabel="启动中..."
-                onClick={() => handleLaunchClick(mode)}
-              />
-            ))}
-        </div>
-      ) : null}
-
-      {advancedOpen && activeProviderMode ? (
+      {activeProviderMode ? (
         <BentoCard>
           <div className="space-y-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -507,24 +471,35 @@ export function LoginRepairPage() {
             </div>
             {providerError ? <div className="text-sm text-destructive">{providerError}</div> : null}
             <Button onClick={submitProviderLaunch} disabled={providerDisabled}>
-              {launchMutation.isPending && runningMode === activeProviderMode ? "启动中..." : `确认并启动 ${activeProviderTitle}`}
+              {launchMutation.isPending && runningAction === activeProviderMode ? "启动中..." : `确认并启动 ${activeProviderTitle}`}
             </Button>
           </div>
         </BentoCard>
       ) : null}
 
-      {advancedOpen ? (
-        <ActionCard
-          title="历史恢复"
-          desc="高级修复入口。会先要求确认关闭当前 Codex，然后修复历史、workspace 和 session index。"
-          icon={Wrench}
-          busy={repairMutation.isPending}
-          disabled={providerDisabled}
-          actionLabel="修复历史"
-          busyLabel="修复中..."
-          onClick={() => void repairWithRuntimeCheck()}
-        />
-      ) : null}
+      <BentoCard>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-sm font-semibold">历史恢复</div>
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">聊天记录、workspace 或 session index 不正常时使用。</p>
+          </div>
+          <Button variant="outline" disabled={providerDisabled} onClick={() => void repairWithRuntimeCheck()}>
+            {repairMutation.isPending ? "修复中..." : "修复历史"}
+          </Button>
+        </div>
+      </BentoCard>
+
+      <BentoCard>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-sm font-semibold">高级恢复选项</div>
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">只有需要放宽恢复范围、处理归档聊天时才打开。</p>
+          </div>
+          <Button variant="outline" onClick={() => setAdvancedOpen((open) => !open)}>
+            {advancedOpen ? "收起高级恢复选项" : "显示高级恢复选项"}
+          </Button>
+        </div>
+      </BentoCard>
 
       {advancedOpen ? (
       <BentoCard>
@@ -620,10 +595,10 @@ export function LoginRepairPage() {
       <RunningCodexWarningDialog
         open={runningWarningOpen}
         processLabel={runningProcessLabel}
-        stopping={stopRuntimeMutation.isPending}
-        error={stopRuntimeError}
+        busy={stoppingRuntime}
+        error={runtimeSafetyNotice}
         onClose={closeRuntimeWarning}
-        onStopAndContinue={() => void stopAndContinue()}
+        onContinue={() => void stopRuntimeAndContinue()}
       />
     </div>
   );
@@ -678,35 +653,35 @@ function RecoverySwitch({
 function RunningCodexWarningDialog({
   open,
   processLabel,
-  stopping,
+  busy,
   error,
   onClose,
-  onStopAndContinue,
+  onContinue,
 }: {
   open: boolean;
   processLabel: string;
-  stopping: boolean;
+  busy: boolean;
   error: string | null;
   onClose: () => void;
-  onStopAndContinue: () => void;
+  onContinue: () => void;
 }) {
   return (
     <AlertDialog open={open}>
       <AlertDialogContent className="max-w-md">
-        <AlertDialogHeader>
-          <AlertDialogTitle>要重启 Codex 吗？</AlertDialogTitle>
+          <AlertDialogHeader>
+          <AlertDialogTitle>需要重启 Codex</AlertDialogTitle>
           <AlertDialogDescription>
-            重启前需要先关闭当前 Codex。继续后我会先关闭它，再重新准备启动。
+            检测到 Codex 正在运行。继续后会先停止可安全停止的运行时，再按当前配置重新启动。
             {processLabel ? <span className="mt-3 block break-words text-xs">检测到：{processLabel}</span> : null}
-            {error ? <span className="mt-3 block text-xs text-destructive">没关掉：{error}</span> : null}
+            {error ? <span className="mt-3 block text-xs text-destructive">{error}</span> : null}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={stopping}>
+          <Button variant="outline" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <AlertDialogAction onClick={onStopAndContinue} disabled={stopping}>
-            {stopping ? "正在关闭..." : "关闭并重启"}
+          <AlertDialogAction onClick={onContinue} disabled={busy}>
+            {busy ? "正在重启..." : "停止并重新启动"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -770,18 +745,61 @@ function buildLaunchNotice(result: PrelaunchLaunchPayload): string | null {
   return null;
 }
 
-function buildStopRuntimeError(result: PrelaunchStopRuntimePayload): string {
-  const remaining = result.remaining ?? [];
-  const errors = result.errors ?? [];
-  const processText =
-    remaining.length > 0
-      ? `还有 ${remaining.length} 个 Codex 进程没有退出：${remaining
-          .slice(0, 4)
-          .map((process) => `${process.image ?? "codex"}${process.pid == null ? "" : ` PID ${process.pid}`}`)
-          .join("、")}`
-      : "仍检测到 Codex 进程";
-  const errorText = errors.length > 0 ? `。系统返回：${errors.slice(0, 2).join("；")}` : "";
-  return `${processText}${errorText}`;
+function EnvironmentCard({ environment }: { environment: PrelaunchEnvironmentPayload }) {
+  const bridgeMode = environment.bridge.usesExe ? "内置 bridge.exe" : "Python bridge";
+  const codexTarget =
+    environment.codexDesktop.productResolvedExe ??
+    environment.codexDesktop.appid ??
+    environment.codexDesktop.lastResortExe ??
+    "未找到";
+  const statusText = environment.ok ? "可启动" : "需要修复";
+  const issueList = [...environment.blockers, ...environment.warnings];
+
+  return (
+    <BentoCard>
+      <div className="space-y-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="text-sm font-semibold">环境自检</div>
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">
+              {statusText} · {bridgeMode} · {environment.runtime.codex_running ? "Codex 正在运行" : "Codex 未运行"}
+            </p>
+          </div>
+          <span className={environment.ok ? "text-sm font-semibold text-primary" : "text-sm font-semibold text-destructive"}>
+            {statusText}
+          </span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Detail label="Codex Home" value={environment.codexHome.exists ? environment.codexHome.path : "未找到"} />
+          <Detail label="Codex Desktop" value={codexTarget} />
+          <Detail label="Provider" value={environment.config.modelProvider ?? "未配置"} />
+          <Detail label="Python Runtime" value={`${environment.runtimes.python.source}: ${environment.runtimes.python.path}`} />
+        </div>
+        {issueList.length ? (
+          <div className="flex flex-wrap gap-2">
+            {issueList.map((item) => (
+              <span key={item} className="rounded border border-border px-2 py-1 text-xs text-muted-foreground">
+                {environment.blockers.includes(item) ? "阻断" : "提示"} · {environmentIssueLabel(item)}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </BentoCard>
+  );
+}
+
+function environmentIssueLabel(issue: string) {
+  const labels: Record<string, string> = {
+    codex_home_missing: "找不到 .codex",
+    prelaunch_bridge_missing: "找不到 prelaunch bridge",
+    codex_desktop_not_found: "找不到 Codex Desktop",
+    config_missing: "缺少 config.toml",
+    auth_missing: "未检测到登录态",
+    threadripper_unavailable: "Threadripper 不可用",
+    hybrid_provider_missing: "缺少混合登录 provider",
+  };
+  return labels[issue] ?? issue;
 }
 
 type AttributionSummary = {

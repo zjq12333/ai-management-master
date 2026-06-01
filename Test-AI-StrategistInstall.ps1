@@ -52,9 +52,19 @@ Invoke-Step "Installed prelaunch bridge smoke commands" {
         throw "prelaunch_bridge.exe --help failed with exit code $LASTEXITCODE"
     }
 
-    & $bridgeExe runtime-status | Out-Null
+    $runtimeStatusJson = & $bridgeExe runtime-status
     if ($LASTEXITCODE -ne 0) {
         throw "prelaunch_bridge.exe runtime-status failed with exit code $LASTEXITCODE"
+    }
+    $runtimeStatus = $runtimeStatusJson | ConvertFrom-Json
+    if (-not $runtimeStatus.ok) {
+        throw "prelaunch_bridge.exe runtime-status returned ok=false"
+    }
+    if (-not $runtimeStatus.PSObject.Properties.Name.Contains("desktop_launch")) {
+        throw "runtime-status did not include desktop_launch diagnostics"
+    }
+    if (-not $runtimeStatus.desktop_launch.PSObject.Properties.Name.Contains("method")) {
+        throw "runtime-status desktop_launch diagnostics did not include a launch method"
     }
 }
 

@@ -26,7 +26,7 @@ from prelaunch_manager import (
     prepare_codex_desktop_notice_state,
     run_threadripper_status,
     subprocess_window_options,
-    terminate_codex_processes,
+    terminate_enhancer_runtime_processes,
     threadripper_command,
 )
 
@@ -89,19 +89,36 @@ def handle_status(codex_home: str) -> dict[str, object]:
 
 def handle_runtime_status() -> dict[str, object]:
     processes = codex_running_processes()
+    desktop_processes = prelaunch_manager.desktop_codex_running_processes()
+    product_resolved_exe = prelaunch_manager.resolved_codex_desktop_exe()
+    appid = prelaunch_manager.find_codex_desktop_appid()
+    last_resort_exe = None if product_resolved_exe else prelaunch_manager.find_codex_desktop_exe()
     return {
         "ok": True,
-        "codex_running": bool(processes),
+        "codex_running": bool(desktop_processes),
         "processes": processes,
+        "desktop_processes": desktop_processes,
+        "desktop_launch": {
+            "product_resolved_exe": product_resolved_exe,
+            "product_resolved_source": os.environ.get("AI_STRATEGIST_CODEX_DESKTOP_SOURCE") or None,
+            "appid": appid,
+            "last_resort_exe": last_resort_exe,
+            "method": (
+                "product_resolved_exe"
+                if product_resolved_exe
+                else "appid"
+                if appid
+                else "windowsapps_exe_last_resort"
+                if last_resort_exe
+                else "none"
+            ),
+        },
     }
 
 
 def handle_stop_runtime() -> dict[str, object]:
-    result = terminate_codex_processes()
-    return {
-        "ok": bool(result.get("ok")),
-        **result,
-    }
+    result = terminate_enhancer_runtime_processes(current_runtime_pid=os.getpid())
+    return {"ok": bool(result.get("ok")), **result}
 
 
 def ensure_codex_not_running() -> None:
@@ -290,25 +307,9 @@ def handle_launch(
     should_restore_history = bool(restore_history) and mode != "official" and not enhanced_reuse_launch
 
     try:
-        takeover = prepare_codex_takeover()
+        takeover = {"ok": True, "skipped": True, "reason": "launch_preserves_existing_codex"}
         payload["takeover"] = takeover
-        if not bool(takeover.get("ok")):
-            payload["launch"] = {"ok": False, "skipped": True, "reason": "takeover_failed"}
-            payload["error"] = "无法结束现有 Codex 进程，无法接管启动。"
-            log_lines.append(
-                "Takeover failed: remaining={remaining} errors={errors}".format(
-                    remaining=takeover.get("remaining") or [],
-                    errors=takeover.get("errors") or [],
-                )
-            )
-            return payload
-        if not bool(takeover.get("skipped")):
-            log_lines.append(
-                "Takeover prepared: killed={killed} remaining={remaining}".format(
-                    killed=len(takeover.get("killed") or []),
-                    remaining=len(takeover.get("remaining") or []),
-                )
-            )
+        log_lines.append("Launch preserves existing Codex processes; no takeover was attempted.")
         if hide_official_quota_notice:
             notice_state = prepare_codex_desktop_notice_state()
             payload["notice_suppression"] = notice_state
@@ -322,7 +323,7 @@ def handle_launch(
 
         codex_home_path = normalize_codex_home(codex_home)
         profile = None if provider is None else ProviderProfile(**provider)
-        if mode in ("api", "hybrid") and profile is None:
+        if mode == "api" and profile is None:
             profile = load_provider_profile_from_config(codex_home_path, mode)
 
         if should_restore_history:
@@ -371,7 +372,7 @@ def handle_launch(
             else:
                 log_lines.append("History restore skipped: official enhanced launch keeps original chat state.")
 
-        if mode == "official":
+        if mode == "official" or enhanced_reuse_launch:
             provider_config = current_provider_config_payload(codex_home, mode)
         else:
             if profile is None:
@@ -489,9 +490,58 @@ def handle_repair(
         write_report_bundle(report_dir, payload, log_lines)
 
 
+def handle_enhanced_launch(codex_home: str) -> dict[str, object]:
+    codex_home_path = normalize_codex_home(codex_home)
+    report_dir = prepare_report_dir("启动增强", "existing-session-enhancer")
+    payload: dict[str, object] = {
+        "ok": False,
+        "started_at": datetime.now().astimezone().isoformat(),
+        "kind": "启动增强",
+        "mode": "existing-session-enhancer",
+        "codex_home": str(codex_home_path),
+        "report_dir": str(report_dir),
+        "stages": {},
+    }
+    log_lines: list[str] = []
+
+    stage = "locate_codex"
+    try:
+        payload["stages"]["locate_codex"] = collect_prelaunch_evidence(codex_home_path).to_dict()
+        log_lines.append("Stage locate_codex: collected local Codex Desktop evidence.")
+
+        stage = "launch_with_enhancer"
+        launch = launch_codex_desktop_with_enhancer(codex_home_path, "existing-session")
+        payload["stages"]["launch_with_enhancer"] = launch
+        payload["launch"] = launch
+        payload["ok"] = bool(launch.get("ok"))
+        if payload["ok"]:
+            log_lines.append(
+                "Stage launch_with_enhancer: ok method={method} runtime_pid={pid}".format(
+                    method=launch.get("method") or "unknown",
+                    pid=launch.get("runtime_pid") or "unknown",
+                )
+            )
+        else:
+            log_lines.append(
+                "Stage launch_with_enhancer: failed error={error}".format(
+                    error=launch.get("error") or launch.get("reason") or "unknown"
+                )
+            )
+        return payload
+    except Exception as exc:
+        payload["error"] = str(exc)
+        payload["stages"][stage] = {"ok": False, "error": str(exc)}
+        log_lines.append(f"Stage {stage}: exception {exc}")
+        return payload
+    finally:
+        payload["finished_at"] = datetime.now().astimezone().isoformat()
+        payload["status"] = "ok" if bool(payload.get("ok")) else "error"
+        write_report_bundle(report_dir, payload, log_lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["status", "runtime-status", "stop-runtime", "launch", "repair"])
+    parser.add_argument("command", choices=["status", "runtime-status", "stop-runtime", "launch", "repair", "enhanced-launch"])
     parser.add_argument("--codex-home", required=False)
     parser.add_argument("--mode", default="official")
     parser.add_argument("--projectless-mode", default="none")
@@ -538,6 +588,10 @@ def main() -> int:
                 allow_missing_session=args.allow_missing_session,
                 unarchive_selected=args.unarchive_selected,
             )
+        elif args.command == "enhanced-launch":
+            if not args.codex_home:
+                raise RuntimeError("--codex-home is required for enhanced-launch")
+            payload = handle_enhanced_launch(args.codex_home)
         else:
             if not args.codex_home:
                 raise RuntimeError("--codex-home is required for launch")

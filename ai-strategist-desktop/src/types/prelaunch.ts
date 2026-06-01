@@ -64,6 +64,56 @@ export interface PrelaunchRuntimeStatusPayload {
   }>;
 }
 
+export interface PrelaunchEnvironmentPayload {
+  ok: boolean;
+  codexHome: {
+    path: string;
+    exists: boolean;
+  };
+  config: {
+    path: string;
+    exists: boolean;
+    modelProvider: string | null;
+    hybridProviderConfigured: boolean;
+    hybridProviderKey: string | null;
+    authMode: string | null;
+    authPath: {
+      path: string;
+      exists: boolean;
+    };
+    statePath: {
+      path: string;
+      exists: boolean;
+    };
+  };
+  bridge: {
+    programPath: string | null;
+    scriptPath: string;
+    exePath: string | null;
+    usesExe: boolean;
+    available: boolean;
+  };
+  runtimes: {
+    python: {
+      path: string;
+      source: string;
+    };
+    threadripper: string | null;
+    threadripperAvailable: boolean;
+  };
+  codexDesktop: {
+    productResolvedExe: string | null;
+    productResolvedSource: string | null;
+    appid: string | null;
+    lastResortExe: string | null;
+    launchAvailable: boolean;
+    running: boolean;
+  };
+  runtime: PrelaunchRuntimeStatusPayload;
+  blockers: string[];
+  warnings: string[];
+}
+
 export interface PrelaunchStopRuntimePayload {
   ok: boolean;
   killed: Array<{

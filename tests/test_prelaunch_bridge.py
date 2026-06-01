@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 import os
 
+import codex_desktop_launcher
 import prelaunch_bridge
 import prelaunch_manager
 
@@ -35,6 +36,36 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.takeover_guard.stop()
         self.reports_guard.stop()
         self.reports_dir.cleanup()
+
+    def test_runtime_status_includes_desktop_launch_diagnostics(self):
+        with mock.patch.object(
+            prelaunch_bridge,
+            "codex_running_processes",
+            return_value=[],
+        ), mock.patch.object(
+            prelaunch_manager,
+            "desktop_codex_running_processes",
+            return_value=[],
+        ), mock.patch.object(
+            prelaunch_manager,
+            "resolved_codex_desktop_exe",
+            return_value=r"C:\Program Files\Codex\Codex.exe",
+        ), mock.patch.object(
+            prelaunch_manager,
+            "find_codex_desktop_appid",
+            return_value="OpenAI.Codex_abc!App",
+        ), mock.patch.dict(
+            "os.environ",
+            {"AI_STRATEGIST_CODEX_DESKTOP_SOURCE": "installedLocal"},
+            clear=False,
+        ):
+            payload = prelaunch_bridge.handle_runtime_status()
+
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["codex_running"])
+        self.assertEqual(payload["desktop_launch"]["method"], "product_resolved_exe")
+        self.assertEqual(payload["desktop_launch"]["product_resolved_source"], "installedLocal")
+        self.assertEqual(payload["desktop_launch"]["appid"], "OpenAI.Codex_abc!App")
 
     def test_normalize_codex_home_expands_windows_environment_variable(self):
         with mock.patch.dict("os.environ", {"AI_STRATEGIST_TEST_HOME": "C:/Users/test"}, clear=False):
@@ -161,7 +192,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertTrue(str(report_dir).startswith(temp_dir))
         self.assertTrue(report_dir.name.endswith("-launch-official"))
 
-    def test_launch_codex_desktop_prefers_product_resolved_exe(self):
+    def test_launch_codex_desktop_prefers_appid_activation_over_product_resolved_exe(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             exe = Path(temp_dir) / "Codex.exe"
             exe.write_text("", encoding="utf-8")
@@ -188,33 +219,72 @@ class PrelaunchBridgeTests(unittest.TestCase):
             ), mock.patch.object(
                 prelaunch_manager,
                 "find_codex_desktop_appid",
-                return_value="SHOULD_NOT_BE_USED",
+                return_value="OpenAI.Codex_abc!App",
             ), mock.patch.object(
                 prelaunch_manager,
                 "prepare_codex_takeover",
                 return_value={"ok": True, "skipped": True},
+            ), mock.patch.object(
+                prelaunch_manager,
+                "wait_for_new_codex_pid",
+                return_value=1001,
+            ), mock.patch.object(
+                prelaunch_manager,
+                "wait_for_visible_codex_window",
+                return_value=1001,
             ):
                 popen.return_value.pid = 1001
                 payload = prelaunch_manager.launch_codex_desktop()
 
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["method"], "product_resolved_exe")
-        self.assertEqual(payload["exe"], str(exe))
+        self.assertEqual(payload["method"], "appid")
+        self.assertEqual(payload["appid"], "OpenAI.Codex_abc!App")
+        self.assertEqual(payload["visible_pid"], 1001)
         popen.assert_called_once()
 
-    def test_launch_codex_desktop_returns_existing_instance_without_takeover(self):
+    def test_launch_codex_desktop_focuses_existing_visible_window(self):
         running = [{"pid": 4242, "image": "Codex.exe", "exe": "C:/Program Files/WindowsApps/OpenAI.Codex/app/Codex.exe"}]
         with mock.patch("prelaunch_manager.desktop_codex_running_processes", return_value=running), mock.patch(
             "prelaunch_manager.prepare_codex_takeover"
-        ) as takeover, mock.patch("prelaunch_manager.focus_codex_window") as focus:
+        ) as takeover, mock.patch("prelaunch_manager.focus_codex_window", return_value={"ok": True}) as focus, mock.patch(
+            "prelaunch_manager.find_codex_desktop_appid", return_value="OpenAI.Codex_abc!App"
+        ), mock.patch("prelaunch_manager.visible_codex_window_pids", return_value=[4242]), mock.patch.object(
+            prelaunch_manager.subprocess, "Popen", wraps=prelaunch_manager.subprocess.Popen
+        ) as popen:
             payload = prelaunch_manager.launch_codex_desktop()
 
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["method"], "already_running")
+        self.assertEqual(payload["method"], "already_running_visible_window")
         self.assertEqual(payload["processes"], running)
-        self.assertEqual(payload["foreground"]["reason"], "already_running_no_focus")
+        self.assertEqual(payload["foreground"]["ok"], True)
         takeover.assert_not_called()
-        focus.assert_not_called()
+        focus.assert_called_once_with(4242)
+        self.assertNotIn(["explorer.exe", "shell:AppsFolder\\OpenAI.Codex_abc!App"], [call.args[0] for call in popen.call_args_list])
+
+    def test_launch_codex_desktop_reactivates_existing_process_without_visible_window(self):
+        running = [{"pid": 4242, "image": "Codex.exe", "exe": "C:/Program Files/WindowsApps/OpenAI.Codex/app/Codex.exe"}]
+        with mock.patch("prelaunch_manager.desktop_codex_running_processes", return_value=running), mock.patch(
+            "prelaunch_manager.prepare_codex_takeover"
+        ) as takeover, mock.patch("prelaunch_manager.focus_codex_window", return_value={"ok": True}) as focus, mock.patch(
+            "prelaunch_manager.find_codex_desktop_appid", return_value="OpenAI.Codex_abc!App"
+        ), mock.patch("prelaunch_manager.visible_codex_window_pids", return_value=[]), mock.patch(
+            "prelaunch_manager.terminate_desktop_codex_processes",
+            side_effect=AssertionError("launch must not terminate Codex Desktop"),
+        ) as terminate, mock.patch("prelaunch_manager.codex_running_processes", return_value=[]), mock.patch(
+            "prelaunch_manager.wait_for_new_codex_pid", return_value=5151
+        ), mock.patch(
+            "prelaunch_manager.wait_for_visible_codex_window", return_value=5151
+        ), mock.patch.object(prelaunch_manager.subprocess, "Popen") as popen:
+            payload = prelaunch_manager.launch_codex_desktop()
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["method"], "appid_reactivate_stale_background")
+        self.assertEqual(payload["processes"], running)
+        takeover.assert_not_called()
+        terminate.assert_not_called()
+        focus.assert_called_once_with(5151)
+        popen.assert_called_once()
+        self.assertEqual(popen.call_args.args[0], ["explorer.exe", "shell:AppsFolder\\OpenAI.Codex_abc!App"])
 
     def test_resolved_codex_desktop_exe_prefers_explicit_environment_path(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -226,7 +296,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
 
         self.assertEqual(resolved, str(exe))
 
-    def test_resolved_codex_desktop_exe_rejects_windowsapps_shim(self):
+    def test_resolved_codex_desktop_exe_accepts_installed_windowsapps_codex(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             exe = (
                 Path(temp_dir)
@@ -242,7 +312,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
             with mock.patch.dict("os.environ", {"AI_STRATEGIST_CODEX_DESKTOP": str(exe)}, clear=False):
                 resolved = prelaunch_manager.resolved_codex_desktop_exe()
 
-        self.assertIsNone(resolved)
+        self.assertEqual(resolved, str(exe))
 
     def test_codex_desktop_env_path_candidates_include_common_localappdata_install(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -516,13 +586,14 @@ class PrelaunchBridgeTests(unittest.TestCase):
             ), mock.patch.object(
                 prelaunch_manager,
                 "terminate_desktop_codex_processes",
-                return_value={"ok": True, "killed": [], "remaining": [], "errors": []},
+                side_effect=AssertionError("launch must not terminate Codex Desktop"),
             ) as terminate:
                 payload = prelaunch_manager.launch_codex_desktop_with_args(["--remote-debugging-port=9229"])
 
-        terminate.assert_called_once()
+        terminate.assert_not_called()
         self.assertFalse(payload["ok"])
         self.assertIn("CDP did not come up", payload["error"])
+        self.assertEqual(payload["cleanup"]["reason"], "preserve_existing_codex_desktop")
 
     def test_desktop_codex_running_processes_filters_out_non_desktop_cli_path(self):
         with mock.patch.object(
@@ -653,8 +724,9 @@ class PrelaunchBridgeTests(unittest.TestCase):
             )
 
         self.assertFalse(payload["ok"])
-        self.assertEqual(payload["method"], "retry_takeover_not_allowed")
+        self.assertEqual(payload["method"], "product_resolved_packaged_activation")
         self.assertEqual(payload["attempts"], 1)
+        self.assertEqual(payload["retry_blocked"], "takeover_not_allowed")
         self.assertEqual(launch_once.call_count, 1)
         takeover.assert_not_called()
 
@@ -807,24 +879,33 @@ class PrelaunchBridgeTests(unittest.TestCase):
         with mock.patch.object(
             prelaunch_bridge,
             "codex_running_processes",
+            return_value=[
+                {"image": "Codex.exe", "pid": 1234},
+                {"image": "codex.exe", "pid": 5678, "exe": r"C:\Users\test\AppData\Local\OpenAI\Codex\bin\hash\codex.exe"},
+            ],
+        ), mock.patch.object(
+            prelaunch_manager,
+            "desktop_codex_running_processes",
             return_value=[{"image": "Codex.exe", "pid": 1234}],
         ):
             payload = prelaunch_bridge.handle_runtime_status()
 
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["codex_running"])
-        self.assertEqual(payload["processes"], [{"image": "Codex.exe", "pid": 1234}])
+        self.assertEqual(payload["desktop_processes"], [{"image": "Codex.exe", "pid": 1234}])
+        self.assertEqual(len(payload["processes"]), 2)
 
-    def test_stop_runtime_terminates_running_processes(self):
+    def test_stop_runtime_terminates_enhancer_runtime_processes(self):
         with mock.patch.object(
             prelaunch_bridge,
-            "terminate_codex_processes",
-            return_value={"ok": True, "killed": [{"image": "Codex.exe", "pid": 1234}], "remaining": [], "errors": []},
-        ):
+            "terminate_enhancer_runtime_processes",
+            return_value={"ok": True, "killed": [{"image": "python.exe", "pid": 1234}], "remaining": [], "errors": []},
+        ) as terminate_enhancer_runtime_processes:
             payload = prelaunch_bridge.handle_stop_runtime()
 
+        terminate_enhancer_runtime_processes.assert_called_once_with(current_runtime_pid=os.getpid())
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["killed"], [{"image": "Codex.exe", "pid": 1234}])
+        self.assertEqual(payload["killed"], [{"image": "python.exe", "pid": 1234}])
 
     def test_runtime_helper_filter_skips_codex_desktop_gui(self):
         gui = {
@@ -1110,7 +1191,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertEqual(payload["notice_suppression"], notice_payload)
         self.assertEqual(payload["launch"]["method"], "enhancer_runtime")
 
-    def test_launch_fails_when_takeover_cannot_stop_existing_codex(self):
+    def test_launch_preserves_codex_when_takeover_would_have_failed(self):
         with mock.patch.object(
             prelaunch_bridge,
             "prepare_codex_takeover",
@@ -1122,6 +1203,10 @@ class PrelaunchBridgeTests(unittest.TestCase):
                 "remaining": [{"image": "Codex.exe", "pid": 1234}],
                 "errors": ["Codex.exe PID 1234: access denied"],
             },
+        ), mock.patch.object(
+            prelaunch_bridge,
+            "launch_codex_desktop_with_enhancer",
+            return_value={"ok": True, "method": "enhancer_runtime", "pid": 4321},
         ):
             payload = prelaunch_bridge.handle_launch(
                 codex_home="C:/Users/test/.codex",
@@ -1130,9 +1215,8 @@ class PrelaunchBridgeTests(unittest.TestCase):
                 projectless_mode="none",
             )
 
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["launch"], {"ok": False, "skipped": True, "reason": "takeover_failed"})
-        self.assertIn("无法结束现有 Codex 进程", payload["error"])
+        self.assertEqual(payload["takeover"]["reason"], "launch_preserves_existing_codex")
+        self.assertNotEqual(payload.get("launch"), {"ok": False, "skipped": True, "reason": "takeover_failed"})
 
     def test_hide_official_quota_notice_prepares_marker_and_continues_for_api_launch(self):
         calls = []
@@ -1229,7 +1313,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertEqual(payload["provider_config"]["target_model_provider"], "lac")
         self.assertEqual(payload["launch"]["method"], "appid")
 
-    def test_hybrid_launch_falls_back_to_existing_provider_profile(self):
+    def test_enhanced_reuse_keeps_current_provider_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             codex_home = Path(temp_dir)
             (codex_home / "config.toml").write_text(
@@ -1265,12 +1349,168 @@ class PrelaunchBridgeTests(unittest.TestCase):
                 payload = prelaunch_bridge.handle_launch(str(codex_home), "hybrid", None, "none")
 
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["provider_config"]["target_model_provider"], "lac")
+        self.assertEqual(payload["provider_config"]["source"], "existing_config")
+        self.assertEqual(payload["provider_config"]["target_model_provider"], "openai")
+        self.assertFalse(payload["provider_config"]["mutated"])
         self.assertEqual(payload["repair"], {"ok": True, "skipped": True, "reason": "enhanced_reuse_keeps_existing_chat_state"})
         self.assertEqual(payload["provider_compatibility"], {"ok": True, "skipped": True, "reason": "enhanced_reuse_skips_provider_compatibility_check", "status": {"rows_needing_reconcile": 0}})
         self.assertEqual(payload["launch"]["method"], "enhancer_runtime")
         run_repair.assert_not_called()
         run_compatibility.assert_not_called()
+
+    def test_enhanced_reuse_launch_skips_codex_takeover(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / ".codex"
+            codex_home.mkdir()
+            config_path = codex_home / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'model_provider = "lac"',
+                        "",
+                        "[model_providers.lac]",
+                        'name = "LAC"',
+                        'base_url = "http://127.0.0.1:20128/v1"',
+                        'wire_api = "responses"',
+                        'requires_openai_auth = true',
+                        'experimental_bearer_token = "sk-test"',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                prelaunch_bridge,
+                "prepare_codex_takeover",
+                side_effect=AssertionError("enhanced reuse launch must not stop existing Codex"),
+            ), mock.patch.object(
+                prelaunch_bridge,
+                "launch_codex_desktop_with_enhancer",
+                return_value={"ok": True, "method": "enhancer_runtime"},
+            ):
+                payload = prelaunch_bridge.handle_launch(str(codex_home), "hybrid", None, "none")
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["takeover"]["reason"], "launch_preserves_existing_codex")
+        self.assertEqual(payload["launch"]["method"], "enhancer_runtime")
+
+    def test_enhanced_reuse_launch_does_not_require_hybrid_provider_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / ".codex"
+            codex_home.mkdir()
+            (codex_home / "config.toml").write_text(
+                "\n".join(
+                    [
+                        'model_provider = "codexzh"',
+                        "",
+                        "[model_providers.codexzh]",
+                        'name = "codexzh"',
+                        'base_url = "https://api.codexzh.com/v1"',
+                        'wire_api = "responses"',
+                        'requires_openai_auth = true',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                prelaunch_bridge,
+                "load_provider_profile_from_config",
+                side_effect=AssertionError("enhanced reuse must not require a hybrid provider"),
+            ), mock.patch.object(
+                prelaunch_bridge,
+                "configure_provider_for_launch",
+                side_effect=AssertionError("enhanced reuse must not rewrite provider config"),
+            ), mock.patch.object(
+                prelaunch_bridge,
+                "launch_codex_desktop_with_enhancer",
+                return_value={"ok": True, "method": "enhancer_runtime"},
+            ):
+                payload = prelaunch_bridge.handle_launch(str(codex_home), "hybrid", None, "none")
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["provider_config"]["source"], "existing_config")
+        self.assertEqual(payload["provider_config"]["target_model_provider"], "codexzh")
+        self.assertFalse(payload["provider_config"]["mutated"])
+        self.assertEqual(payload["launch"]["method"], "enhancer_runtime")
+
+    def test_existing_session_enhanced_launch_does_not_touch_provider_or_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / ".codex"
+            codex_home.mkdir()
+            (codex_home / "config.toml").write_text('model_provider = "codexzh"\n', encoding="utf-8")
+
+            evidence = mock.Mock()
+            evidence.to_dict.return_value = {"ok": True, "config_model_provider": "codexzh"}
+            with mock.patch.object(
+                prelaunch_bridge,
+                "collect_prelaunch_evidence",
+                return_value=evidence,
+            ), mock.patch.object(
+                prelaunch_bridge,
+                "load_provider_profile_from_config",
+                side_effect=AssertionError("existing-session launch must not read provider profiles"),
+            ), mock.patch.object(
+                prelaunch_bridge,
+                "configure_provider_for_launch",
+                side_effect=AssertionError("existing-session launch must not mutate provider config"),
+            ), mock.patch.object(
+                prelaunch_bridge,
+                "run_history_repair",
+                side_effect=AssertionError("existing-session launch must not repair history"),
+            ), mock.patch.object(
+                prelaunch_bridge,
+                "launch_codex_desktop_with_enhancer",
+                return_value={"ok": True, "method": "enhancer_runtime", "runtime_pid": 1234},
+            ) as launch:
+                payload = prelaunch_bridge.handle_enhanced_launch(str(codex_home))
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["mode"], "existing-session-enhancer")
+        self.assertEqual(payload["stages"]["locate_codex"]["config_model_provider"], "codexzh")
+        self.assertEqual(payload["launch"]["method"], "enhancer_runtime")
+        launch.assert_called_once_with(codex_home, "existing-session")
+
+    def test_existing_session_enhanced_launch_reports_locate_failures_in_locate_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / ".codex"
+            codex_home.mkdir()
+
+            with mock.patch.object(
+                prelaunch_bridge,
+                "collect_prelaunch_evidence",
+                side_effect=OSError(193, "%1 is not a valid Win32 application"),
+            ), mock.patch.object(
+                prelaunch_bridge,
+                "launch_codex_desktop_with_enhancer",
+            ) as launch:
+                payload = prelaunch_bridge.handle_enhanced_launch(str(codex_home))
+
+        self.assertFalse(payload["ok"])
+        self.assertIn("locate_codex", payload["stages"])
+        self.assertNotIn("launch_with_enhancer", payload["stages"])
+        launch.assert_not_called()
+
+    def test_threadripper_status_error_does_not_block_prelaunch_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / ".codex"
+            codex_home.mkdir()
+            (codex_home / "config.toml").write_text('model_provider = "openai"\n', encoding="utf-8")
+            fake_tool = Path(tmp) / "codex-threadripper"
+            fake_tool.write_text("not a windows executable", encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"AI_STRATEGIST_THREADRIPPER": str(fake_tool)}, clear=False), mock.patch.object(
+                prelaunch_manager.subprocess,
+                "run",
+                side_effect=OSError(193, "%1 is not a valid Win32 application"),
+            ):
+                evidence = prelaunch_manager.collect_prelaunch_evidence(codex_home)
+
+        self.assertTrue(evidence.threadripper_available)
+        self.assertIsNone(evidence.threadripper_target_provider)
+        self.assertIsNone(evidence.rows_needing_reconcile)
 
     def test_enhancer_runtime_ready_stable_wait_defaults_to_startup_settle_delay(self):
         with mock.patch.dict("os.environ", {}, clear=True):
@@ -1279,6 +1519,35 @@ class PrelaunchBridgeTests(unittest.TestCase):
     def test_enhancer_runtime_ready_stable_wait_can_be_overridden(self):
         with mock.patch.dict("os.environ", {"AI_STRATEGIST_ENHANCER_READY_STABLE_SECONDS": "0.5"}, clear=True):
             self.assertEqual(prelaunch_manager.enhancer_ready_stable_seconds(), 0.5)
+
+    def test_stable_enhancer_runtime_script_copies_from_pyinstaller_temp_dir(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as local_app_data:
+            mei_dir = Path(tmp) / "_MEI12345"
+            mei_dir.mkdir()
+            for name in (
+                "enhancer_runtime.py",
+                "enhancer_renderer_inject.js",
+                "enhancer_runtime_watcher.py",
+                "enhancer_handoff.py",
+                "repair_codex_desktop_history.py",
+                "prelaunch_manager.py",
+                "codex_desktop_launcher.py",
+                "codex_desktop_app_paths.py",
+            ):
+                (mei_dir / name).write_text(f"# {name}\n", encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": local_app_data}, clear=False):
+                runtime_script = prelaunch_manager.stable_enhancer_runtime_script(
+                    mei_dir / "enhancer_runtime.py"
+                )
+
+            self.assertEqual(
+                runtime_script,
+                Path(local_app_data) / "AI-Strategist" / "enhancer-runtime" / "enhancer_runtime.py",
+            )
+            self.assertTrue(runtime_script.exists())
+            self.assertTrue((runtime_script.parent / "enhancer_renderer_inject.js").exists())
+            self.assertTrue((runtime_script.parent / "enhancer_runtime_watcher.py").exists())
 
     def test_enhancer_runtime_launch_options_hide_console_windows(self):
         options = prelaunch_manager.enhancer_runtime_launch_options()
@@ -1808,3 +2077,31 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["repair"], {"ok": False, "error": "repair exploded"})
         self.assertEqual(payload["launch"], {"ok": False, "skipped": True, "reason": "prelaunch_repair_failed"})
+
+    def test_stop_runtime_only_stops_enhancer_runtime(self):
+        with mock.patch.object(
+            prelaunch_bridge,
+            "terminate_enhancer_runtime_processes",
+            return_value={"ok": True, "killed": [{"pid": 1234}], "remaining": []},
+        ) as terminate_enhancer_runtime_processes:
+            payload = prelaunch_bridge.handle_stop_runtime()
+
+        terminate_enhancer_runtime_processes.assert_called_once_with(current_runtime_pid=os.getpid())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["killed"], [{"pid": 1234}])
+
+    def test_failed_enhanced_launch_cleanup_preserves_codex_desktop(self):
+        terminate_runtimes = mock.Mock(return_value={"ok": True, "killed": [{"pid": 4321}]})
+        terminate_desktop = mock.Mock(return_value={"ok": False, "killed": [{"pid": 9999}]})
+
+        payload = codex_desktop_launcher.cleanup_failed_enhanced_launch(
+            current_runtime_pid=1111,
+            terminate_runtimes=terminate_runtimes,
+            terminate_desktop=terminate_desktop,
+            timeout_seconds=2.0,
+        )
+
+        terminate_runtimes.assert_called_once_with(1111, 2.0)
+        terminate_desktop.assert_not_called()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["desktop"]["reason"], "preserve_existing_codex_desktop")

@@ -573,9 +573,16 @@ def python_runtime_supports_enhancer_modules(python_executable: Path) -> bool:
 
 def resolved_python_runtime_executable() -> str:
     configured = os.environ.get("AI_STRATEGIST_PYTHON_RUNTIME") or os.environ.get("AI_STRATEGIST_PYTHON")
+    bundled = bool(getattr(sys, "frozen", False))
     runtime_path = Path(configured) if configured else Path(sys.executable)
     if configured and not runtime_path.exists():
         runtime_path = Path(sys.executable)
+    if bundled and not configured:
+        for command in ("pythonw", "python", "py"):
+            resolved = shutil.which(command)
+            if resolved:
+                runtime_path = Path(resolved)
+                break
     if configured and runtime_path.exists() and not python_runtime_supports_enhancer_modules(runtime_path):
         runtime_path = Path(sys.executable)
     if os.name == "nt":
@@ -599,6 +606,48 @@ def enhancer_runtime_launch_options() -> dict[str, object]:
             | getattr(subprocess, "CREATE_NO_WINDOW", 0)
         )
     return options
+
+
+def stable_enhancer_runtime_dir() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "AI-Strategist" / "enhancer-runtime"
+    return Path(tempfile.gettempdir()) / "AI-Strategist" / "enhancer-runtime"
+
+
+def is_pyinstaller_temp_path(path: Path) -> bool:
+    resolved = path.resolve()
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        try:
+            resolved.relative_to(Path(meipass).resolve())
+            return True
+        except ValueError:
+            pass
+    return any(part.upper().startswith("_MEI") for part in resolved.parts)
+
+
+def stable_enhancer_runtime_script(source_script: Path | None = None) -> Path:
+    source = source_script or Path(__file__).resolve().with_name("enhancer_runtime.py")
+    if not is_pyinstaller_temp_path(source):
+        return source
+    target_dir = stable_enhancer_runtime_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    module_names = [
+        "enhancer_runtime.py",
+        "enhancer_renderer_inject.js",
+        "enhancer_runtime_watcher.py",
+        "enhancer_handoff.py",
+        "repair_codex_desktop_history.py",
+        "prelaunch_manager.py",
+        "codex_desktop_launcher.py",
+        "codex_desktop_app_paths.py",
+    ]
+    for module_name in module_names:
+        source_path = source.with_name(module_name)
+        if source_path.exists():
+            shutil.copy2(source_path, target_dir / module_name)
+    return target_dir / "enhancer_runtime.py"
 
 
 def enhancer_ready_stable_seconds() -> float:
@@ -685,14 +734,21 @@ def run_threadripper_status(codex_home: Path) -> dict[str, object] | None:
     command = threadripper_command()
     if not command:
         return None
-    process = subprocess.run(
-        [command, "--codex-home", str(codex_home), "status"],
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-        **subprocess_window_options(),
-    )
+    try:
+        process = subprocess.run(
+            [command, "--codex-home", str(codex_home), "status"],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            **subprocess_window_options(),
+        )
+    except OSError as exc:
+        return {
+            "target_provider": None,
+            "rows_needing_reconcile": None,
+            "error": f"Unable to run threadripper command {command!r}: {exc}",
+        }
     if process.returncode != 0:
         return {
             "target_provider": None,
@@ -989,6 +1045,29 @@ def focus_codex_window(pid: int | None = None, timeout_seconds: float = 10.0) ->
     }
 
 
+def visible_codex_window_pids() -> list[int]:
+    if os.name != "nt":
+        return []
+    try:
+        output = _powershell_output(
+            "Get-Process Codex -ErrorAction SilentlyContinue | "
+            "Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle } | "
+            "Select-Object -ExpandProperty Id"
+        )
+    except Exception:
+        return []
+    pids: list[int] = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            pids.append(int(line))
+        except ValueError:
+            continue
+    return pids
+
+
 def wait_for_new_codex_pid(existing_pids: set[int], timeout_seconds: float = 10.0) -> int | None:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
@@ -996,7 +1075,17 @@ def wait_for_new_codex_pid(existing_pids: set[int], timeout_seconds: float = 10.
             pid = process.get("pid")
             if isinstance(pid, int) and pid not in existing_pids:
                 return pid
-            time.sleep(0.25)
+        time.sleep(0.25)
+    return None
+
+
+def wait_for_visible_codex_window(timeout_seconds: float = 12.0) -> int | None:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        visible_pids = visible_codex_window_pids()
+        if visible_pids:
+            return visible_pids[0]
+        time.sleep(0.25)
     return None
 
 
@@ -1042,34 +1131,88 @@ def launch_codex_desktop() -> dict[str, object]:
     """
     Launch Codex Desktop reliably.
 
-    Primary: product-resolved executable path injected by the Tauri runtime
-    resolver. Fallback: Start menu AppID via `shell:AppsFolder\\<AppID>`.
+    MSIX/Store apps are best activated through their AppUserModelID. Directly
+    running the WindowsApps executable can leave Codex in a process-only state.
+    Never terminate an existing Codex process here; this tool may itself be
+    running inside Codex Desktop.
     """
+    appid = find_codex_desktop_appid()
     running = desktop_codex_running_processes()
-    if running:
-        return {
-            "ok": True,
-            "method": "already_running",
-            "processes": running,
-            "foreground": {"ok": False, "skipped": True, "reason": "already_running_no_focus"},
-        }
-
-    takeover = prepare_codex_takeover()
-    if not bool(takeover.get("ok")):
-        return {
-            "ok": False,
-            "method": "takeover_failed",
-            "takeover": takeover,
-            "error": "Unable to terminate an existing Codex Desktop instance before launch.",
-        }
-
     existing_pids = {
         pid
         for pid in (process.get("pid") for process in codex_running_processes())
         if isinstance(pid, int)
     }
+    if running:
+        visible_pids = visible_codex_window_pids()
+        for visible_pid in visible_pids:
+            foreground = focus_codex_window(visible_pid)
+            if bool(foreground.get("ok")):
+                return {
+                    "ok": True,
+                    "method": "already_running_visible_window",
+                    "appid": appid,
+                    "processes": running,
+                    "visible_window_pids": visible_pids,
+                    "foreground": foreground,
+                }
+
+        if appid:
+            target = f"shell:AppsFolder\\{appid}"
+            subprocess.Popen(
+                ["explorer.exe", target],
+                env=codex_process_environment(),
+                **subprocess_window_options(),
+            )
+            pid = wait_for_new_codex_pid(existing_pids)
+            visible_pid = wait_for_visible_codex_window()
+            foreground = focus_codex_window(visible_pid or pid)
+            return {
+                "ok": bool(foreground.get("ok")),
+                "method": "appid_reactivate_stale_background",
+                "appid": appid,
+                "processes": running,
+                "visible_window_pids": visible_pids,
+                "pid": pid,
+                "visible_pid": visible_pid,
+                "foreground": foreground,
+                "error": None
+                if bool(foreground.get("ok"))
+                else "Codex was already running in the background, and AppID reactivation still did not produce a visible window.",
+            }
+
+        return {
+            "ok": False,
+            "method": "already_running_without_appid",
+            "appid": appid,
+            "processes": running,
+            "visible_window_pids": visible_pids,
+            "foreground": {"ok": False, "skipped": True, "reason": "already_running_without_visible_window"},
+            "error": "Codex is already running but has no visible window, and no AppID was found for reactivation.",
+        }
+
     env = codex_process_environment()
     exe = resolved_codex_desktop_exe()
+    if appid:
+        target = f"shell:AppsFolder\\{appid}"
+        subprocess.Popen(
+            ["explorer.exe", target],
+            env=env,
+            **subprocess_window_options(),
+        )
+        pid = wait_for_new_codex_pid(existing_pids)
+        visible_pid = wait_for_visible_codex_window()
+        foreground = focus_codex_window(visible_pid or pid)
+        return {
+            "ok": bool(foreground.get("ok")),
+            "method": "appid",
+            "appid": appid,
+            "pid": pid,
+            "visible_pid": visible_pid,
+            "foreground": foreground,
+            "error": None if bool(foreground.get("ok")) else "Codex AppID activation did not produce a visible window.",
+        }
+
     if exe:
         process = subprocess.Popen([exe], cwd=str(Path(exe).parent), env=env, **gui_launch_options())
         return {
@@ -1077,25 +1220,7 @@ def launch_codex_desktop() -> dict[str, object]:
             "method": "product_resolved_exe",
             "exe": exe,
             "source": os.environ.get("AI_STRATEGIST_CODEX_DESKTOP_SOURCE") or "managedLocal",
-            "takeover": takeover,
             "foreground": focus_codex_window(process.pid),
-        }
-
-    appid = find_codex_desktop_appid()
-    if appid:
-        target = f"shell:AppsFolder\\{appid}"
-        subprocess.Popen(
-            ["powershell", "-NoProfile", "-Command", f"Start-Process '{target}'"],
-            env=env,
-            **subprocess_window_options(),
-        )
-        pid = wait_for_new_codex_pid(existing_pids)
-        return {
-            "ok": True,
-            "method": "appid",
-            "appid": appid,
-            "takeover": takeover,
-            "foreground": focus_codex_window(pid),
         }
 
     exe = find_codex_desktop_exe()
@@ -1106,7 +1231,6 @@ def launch_codex_desktop() -> dict[str, object]:
             "method": "windowsapps_exe_last_resort",
             "exe": exe,
             "warning": "Launched through WindowsApps last-resort discovery; product-managed resolver did not provide Codex Desktop.",
-            "takeover": takeover,
             "foreground": focus_codex_window(process.pid),
         }
 
@@ -1137,7 +1261,6 @@ def _launch_codex_desktop_with_args_once(normalized_args: list[str], debug_port:
                     else:
                         os.environ[key] = value
             if debug_port is not None and not wait_for_cdp(debug_port):
-                terminate_desktop_codex_processes(timeout_seconds=3.0)
                 return {
                     "ok": False,
                     "method": "product_resolved_packaged_activation",
@@ -1148,6 +1271,7 @@ def _launch_codex_desktop_with_args_once(normalized_args: list[str], debug_port:
                     "debug_port": debug_port,
                     "pid": pid,
                     "error": f"Codex Desktop launched but {CDP_NOT_READY_ERROR_FRAGMENT} on port {debug_port}.",
+                    "cleanup": {"ok": True, "skipped": True, "reason": "preserve_existing_codex_desktop"},
                 }
             return {
                 "ok": True,
@@ -1163,7 +1287,6 @@ def _launch_codex_desktop_with_args_once(normalized_args: list[str], debug_port:
 
         process = subprocess.Popen([exe, *normalized_args], cwd=str(exe_path.parent), env=env, **gui_launch_options())
         if debug_port is not None and not wait_for_cdp(debug_port):
-            terminate_desktop_codex_processes(timeout_seconds=3.0)
             return {
                 "ok": False,
                 "method": "product_resolved_exe",
@@ -1173,6 +1296,7 @@ def _launch_codex_desktop_with_args_once(normalized_args: list[str], debug_port:
                 "debug_port": debug_port,
                 "pid": process.pid,
                 "error": f"Codex Desktop launched but {CDP_NOT_READY_ERROR_FRAGMENT} on port {debug_port}.",
+                "cleanup": {"ok": True, "skipped": True, "reason": "preserve_existing_codex_desktop"},
             }
         return {
             "ok": True,
@@ -1201,7 +1325,6 @@ def _launch_codex_desktop_with_args_once(normalized_args: list[str], debug_port:
                     else:
                         os.environ[key] = value
             if debug_port is not None and not wait_for_cdp(debug_port):
-                terminate_desktop_codex_processes(timeout_seconds=3.0)
                 return {
                     "ok": False,
                     "method": "windowsapps_packaged_activation",
@@ -1211,6 +1334,7 @@ def _launch_codex_desktop_with_args_once(normalized_args: list[str], debug_port:
                     "debug_port": debug_port,
                     "pid": pid,
                     "error": f"Codex Desktop launched but {CDP_NOT_READY_ERROR_FRAGMENT} on port {debug_port}.",
+                    "cleanup": {"ok": True, "skipped": True, "reason": "preserve_existing_codex_desktop"},
                 }
             return {
                 "ok": True,
@@ -1225,7 +1349,6 @@ def _launch_codex_desktop_with_args_once(normalized_args: list[str], debug_port:
 
         process = subprocess.Popen([exe, *normalized_args], cwd=str(exe_path.parent), env=env, **gui_launch_options())
         if debug_port is not None and not wait_for_cdp(debug_port):
-            terminate_desktop_codex_processes(timeout_seconds=3.0)
             return {
                 "ok": False,
                 "method": "windowsapps_exe_last_resort",
@@ -1234,6 +1357,7 @@ def _launch_codex_desktop_with_args_once(normalized_args: list[str], debug_port:
                 "debug_port": debug_port,
                 "pid": process.pid,
                 "error": f"Codex Desktop launched but {CDP_NOT_READY_ERROR_FRAGMENT} on port {debug_port}.",
+                "cleanup": {"ok": True, "skipped": True, "reason": "preserve_existing_codex_desktop"},
             }
         return {
             "ok": True,
@@ -1290,7 +1414,7 @@ def launch_codex_desktop_with_retry(
 
 
 def launch_codex_desktop_with_enhancer(codex_home: Path, launch_mode: str = "official") -> dict[str, object]:
-    runtime_script = Path(__file__).resolve().with_name("enhancer_runtime.py")
+    runtime_script = stable_enhancer_runtime_script()
     status_path = Path(tempfile.gettempdir()) / f"ai-strategist-enhancer-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.json"
     log_path = Path(tempfile.gettempdir()) / f"ai-strategist-enhancer-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.log"
     runtime_python = resolved_python_runtime_executable()

@@ -260,11 +260,14 @@ def cleanup_failed_enhanced_launch(
     timeout_seconds: float = 5.0,
 ) -> dict[str, object]:
     launcher = terminate_runtimes(current_runtime_pid, timeout_seconds)
-    desktop = terminate_desktop(timeout_seconds)
     return {
-        "ok": bool(launcher.get("ok")) and bool(desktop.get("ok")),
+        "ok": bool(launcher.get("ok")),
         "launcher": launcher,
-        "desktop": desktop,
+        "desktop": {
+            "ok": True,
+            "skipped": True,
+            "reason": "preserve_existing_codex_desktop",
+        },
     }
 
 
@@ -303,16 +306,11 @@ def launch_codex_desktop_with_retry(
 
         if attempt > 1:
             if not allow_takeover:
-                return {
-                    "ok": False,
-                    "method": "retry_takeover_not_allowed",
-                    "attempt": attempt,
-                    "attempts": attempt - 1,
-                    "args": normalized_args,
-                    "debug_port": debug_port,
-                    "error": "Codex Desktop did not become ready; explicit repair is required before takeover.",
-                    "previous_attempts": previous_attempts,
-                }
+                blocked_payload = dict(payload)
+                blocked_payload["attempts"] = attempt - 1
+                blocked_payload["retry_blocked"] = "takeover_not_allowed"
+                blocked_payload["previous_attempts"] = previous_attempts[:-1]
+                return blocked_payload
             takeover = prepare_takeover(max(5.0, retry_cooldown_seconds + 3.5), retry_cooldown_seconds)
             if not bool(takeover.get("ok")):
                 return {

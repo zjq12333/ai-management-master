@@ -32,11 +32,12 @@
 import type {
   PrelaunchLaunchPayload,
   PrelaunchMode,
+  PrelaunchEnvironmentPayload,
   PrelaunchProviderPayload,
   PrelaunchRecoveryOptionsPayload,
   PrelaunchRuntimeStatusPayload,
-  PrelaunchStopRuntimePayload,
   PrelaunchStatusPayload,
+  PrelaunchStopRuntimePayload,
 } from "@/types/prelaunch";
 import type { EnhancerSettingsPayload } from "@/types/enhancer";
 import type { LacControlSpaceStatusPayload } from "@/types/lac";
@@ -56,6 +57,9 @@ export const api = {
 
   prelaunchStatus: (codexHome: string) =>
     invoke<PrelaunchStatusPayload>("prelaunch_status", { codexHome }),
+
+  prelaunchEnvironment: (codexHome: string) =>
+    invoke<PrelaunchEnvironmentPayload>("prelaunch_environment", { codexHome }),
 
   prelaunchRuntimeStatus: () =>
     invoke<PrelaunchRuntimeStatusPayload>("prelaunch_runtime_status"),
@@ -77,6 +81,9 @@ export const api = {
       hideOfficialQuotaNotice,
       restoreHistory,
     }),
+
+  prelaunchEnhancedLaunch: (codexHome: string) =>
+    invoke<PrelaunchLaunchPayload>("prelaunch_enhanced_launch", { codexHome }),
 
   prelaunchRepair: (codexHome: string, options?: PrelaunchRecoveryOptionsPayload) =>
     invoke<PrelaunchLaunchPayload>("prelaunch_repair", { codexHome, ...options }),

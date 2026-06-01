@@ -21,9 +21,9 @@ from prelaunch_manager import (
     desktop_codex_running_processes,
     config_path_from_codex_home,
     configure_provider_for_launch,
+    ensure_must_install_local_plugins,
     launch_codex_desktop_with_retry,
     load_enhancer_settings,
-    prepare_codex_takeover,
     read_model_provider,
 )
 
@@ -363,11 +363,7 @@ def takeover_and_attach(
     log_file: str | None = None,
 ) -> bool:
     current_port = int(debug_port_ref["value"])
-    append_runtime_log(log_file, f"watcher takeover requested on debug port {current_port}")
-    cleanup = prepare_codex_takeover(timeout_seconds=8.0, cooldown_seconds=1.5)
-    if not bool(cleanup.get("ok")):
-        append_runtime_log(log_file, f"watcher takeover cleanup failed: {cleanup}")
-        return False
+    append_runtime_log(log_file, f"watcher relaunch requested on debug port {current_port}")
 
     launch = launch_codex_desktop_with_retry(debug_args(current_port), attempts=3)
     if not launch.get("ok"):
@@ -410,6 +406,7 @@ def main() -> int:
 
     codex_home = history_repair.normalize_path(args.codex_home)
     restore_payload = None
+    must_install_plugins_payload = None
     phase = "startup"
     status_ready = False
     try:
@@ -429,12 +426,22 @@ def main() -> int:
                 ensure_ascii=False,
             ),
         )
+        phase = "ensure-must-install-plugins"
+        must_install_plugins_payload = ensure_must_install_local_plugins(codex_home)
+        if must_install_plugins_payload.get("enabled"):
+            append_runtime_log(
+                args.log_file,
+                "must-install plugins "
+                + json.dumps(must_install_plugins_payload, ensure_ascii=False, sort_keys=True),
+            )
         if args.launch_mode == "official":
             phase = "official-provider-override"
             config_path = config_path_from_codex_home(codex_home)
             raw = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
             if read_model_provider(raw) != "openai":
                 restore_payload = configure_provider_for_launch(codex_home, "official")
+        elif args.launch_mode == "existing-session":
+            append_runtime_log(args.log_file, "existing-session launch keeps current Codex provider and login state")
 
         phase = "desktop-launch"
         launch = launch_codex_desktop_with_retry(
@@ -501,6 +508,7 @@ def main() -> int:
                 "debug_port": actual_debug_port,
                 "phase": "ready",
                 "log_file": args.log_file,
+                "must_install_plugins": must_install_plugins_payload,
             },
         )
         status_ready = True

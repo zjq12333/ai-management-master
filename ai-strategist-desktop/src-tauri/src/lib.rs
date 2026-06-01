@@ -7,6 +7,7 @@ use image::ImageReader;
 use platform::paths::CodexPaths;
 use std::cell::RefCell;
 use std::io::Cursor;
+use std::io::Write;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use tauri::image::Image;
@@ -14,14 +15,17 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, RunEvent};
 
 pub fn run() {
+    append_app_log("run_start");
     let shared_paths = Arc::new(CodexPaths::new());
 
     let single_instance_guard = match platform::single_instance::acquire(&shared_paths) {
         Ok(guard) => guard,
         Err(error) => {
+            append_app_log(&format!("single_instance_exit error={error}"));
             eprintln!("[AI Strategist] another instance is already running; exiting: {error}");
             let activated = platform::single_instance::request_existing_instance_activation();
             if !activated {
+                append_app_log("single_instance_activation_failed");
                 eprintln!("[AI Strategist] failed to activate the running instance");
             }
             return;
@@ -42,18 +46,7 @@ pub fn run() {
         // .plugin(updater_plugin_updater.build())
         .manage(Mutex::new(Repository::new()))
         .setup(|app| {
-            if let Some(window) = app.get_webview_window("main") {
-                let win = window.clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = win.hide();
-                        #[cfg(target_os = "macos")]
-                        platform::dock::set_dock_visible(false);
-                    }
-                });
-            }
-
+            configure_main_window(app.handle());
             let repo_state: tauri::State<'_, Mutex<Repository>> = app.state();
             let hotspot_enabled = repo_state
                 .lock()
@@ -95,9 +88,11 @@ pub fn run() {
             commands::mcp::set_mcp_server_enabled,
             commands::mcp::remove_mcp_server,
             commands::prelaunch::prelaunch_status,
+            commands::prelaunch::prelaunch_environment,
             commands::prelaunch::prelaunch_runtime_status,
             commands::prelaunch::prelaunch_stop_runtime,
             commands::prelaunch::prelaunch_launch,
+            commands::prelaunch::prelaunch_enhanced_launch,
             commands::prelaunch::prelaunch_repair,
             commands::lac::lac_control_space_status,
             commands::skills::load_installed_skills,
@@ -146,13 +141,18 @@ pub fn run() {
             commands::window_control::window_control,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building AI Strategist");
+        .unwrap_or_else(|error| {
+            append_app_log(&format!("build_failed error={error}"));
+            panic!("error while building AI Strategist: {error}");
+        });
+    append_app_log("build_success");
 
     let activation_watcher_guard = platform::single_instance::start_activation_watcher({
         let handle = app.handle().clone();
         move || commands::hotspot::force_reveal_main_window(&handle)
     })
     .map_err(|error| {
+        append_app_log(&format!("activation_watcher_failed error={error}"));
         eprintln!("[AI Strategist] failed to start single-instance activation watcher: {error}");
         error
     })
@@ -163,6 +163,8 @@ pub fn run() {
 
     app.run(move |_app_handle, event| {
         if matches!(event, RunEvent::Exit) {
+            append_app_log("run_event_exit");
+            append_app_log("run_event_exit_preserve_external_codex_runtime");
             let _ = activation_watcher_guard_for_exit.borrow_mut().take();
             let _ = single_instance_guard_for_exit.borrow_mut().take();
         }
@@ -172,6 +174,48 @@ pub fn run() {
             commands::hotspot::force_reveal_main_window(_app_handle);
         }
     });
+    append_app_log("run_returned");
+}
+
+fn configure_main_window(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        append_app_log("main_window_missing");
+        return;
+    };
+    if let Err(error) = window.set_title("AI Strategist") {
+        append_app_log(&format!("main_window_set_title_failed error={error}"));
+    }
+    if let Err(error) = window.show() {
+        append_app_log(&format!("main_window_show_failed error={error}"));
+    }
+    if let Err(error) = window.unminimize() {
+        append_app_log(&format!("main_window_unminimize_failed error={error}"));
+    }
+    if let Err(error) = window.set_focus() {
+        append_app_log(&format!("main_window_focus_failed error={error}"));
+    }
+    append_app_log("main_window_configured");
+}
+
+fn append_app_log(message: &str) {
+    let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") else {
+        return;
+    };
+    let log_dir = std::path::PathBuf::from(local_app_data)
+        .join("AI-Strategist")
+        .join("logs");
+    if std::fs::create_dir_all(&log_dir).is_err() {
+        return;
+    }
+    let log_path = log_dir.join("app.log");
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+    {
+        let _ = writeln!(file, "[{timestamp}] {message}");
+    }
 }
 
 pub fn run_daemon_once_cli() -> Result<(), String> {

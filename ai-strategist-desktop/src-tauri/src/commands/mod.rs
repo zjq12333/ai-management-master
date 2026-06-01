@@ -5,6 +5,8 @@ pub mod hotspot;
 pub mod lac;
 pub mod mcp;
 pub mod prelaunch;
+pub mod prelaunch_bridge;
+pub mod prelaunch_provider;
 pub mod skills;
 pub mod system;
 pub mod tray_menu;

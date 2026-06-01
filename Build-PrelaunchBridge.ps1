@@ -8,6 +8,7 @@ $ErrorActionPreference = "Stop"
 
 $resolvedRoot = (Resolve-Path -LiteralPath $RepoRoot).ProviderPath
 $bridgeScript = Join-Path $resolvedRoot "prelaunch_bridge.py"
+$rendererInjectScript = Join-Path $resolvedRoot "enhancer_renderer_inject.js"
 $distDir = if ($OutputDir) {
     $OutputDir
 } else {
@@ -18,6 +19,9 @@ $specDir = Join-Path $resolvedRoot "artifacts\pyinstaller-prelaunch-spec"
 
 if (-not (Test-Path -LiteralPath $bridgeScript)) {
     throw "prelaunch_bridge.py was not found: $bridgeScript"
+}
+if (-not (Test-Path -LiteralPath $rendererInjectScript)) {
+    throw "enhancer_renderer_inject.js was not found: $rendererInjectScript"
 }
 
 $previousErrorActionPreference = $ErrorActionPreference
@@ -48,6 +52,7 @@ python -m PyInstaller `
     --hidden-import repair_codex_desktop_history `
     --hidden-import codex_desktop_app_paths `
     --hidden-import codex_desktop_launcher `
+    --add-data "$rendererInjectScript;." `
     $bridgeScript
 
 $exePath = Join-Path $distDir "prelaunch_bridge.exe"

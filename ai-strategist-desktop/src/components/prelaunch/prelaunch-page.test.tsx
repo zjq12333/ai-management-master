@@ -10,27 +10,33 @@ import { ALL_APP_ROUTES } from "@/types/navigation";
 
 const {
   prelaunchStatusMock,
+  prelaunchEnvironmentMock,
   getEnhancerSettingsMock,
   prelaunchRuntimeStatusMock,
   prelaunchStopRuntimeMock,
   prelaunchLaunchMock,
+  prelaunchEnhancedLaunchMock,
   prelaunchRepairMock,
 } = vi.hoisted(() => ({
   prelaunchStatusMock: vi.fn(),
+  prelaunchEnvironmentMock: vi.fn(),
   getEnhancerSettingsMock: vi.fn(),
   prelaunchRuntimeStatusMock: vi.fn(),
   prelaunchStopRuntimeMock: vi.fn(),
   prelaunchLaunchMock: vi.fn(),
+  prelaunchEnhancedLaunchMock: vi.fn(),
   prelaunchRepairMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     prelaunchStatus: prelaunchStatusMock,
+    prelaunchEnvironment: prelaunchEnvironmentMock,
     getEnhancerSettings: getEnhancerSettingsMock,
     prelaunchRuntimeStatus: prelaunchRuntimeStatusMock,
     prelaunchStopRuntime: prelaunchStopRuntimeMock,
     prelaunchLaunch: prelaunchLaunchMock,
+    prelaunchEnhancedLaunch: prelaunchEnhancedLaunchMock,
     prelaunchRepair: prelaunchRepairMock,
   },
 }));
@@ -162,6 +168,54 @@ beforeEach(() => {
     },
     launch: { method: "appid" },
   });
+  prelaunchEnhancedLaunchMock.mockReset();
+  prelaunchEnhancedLaunchMock.mockResolvedValue({
+    ok: true,
+    mode: "existing-session",
+    report_dir: "D:/repo/reports/20260522-123456-增强启动",
+    provider_config: { target_model_provider: "openai" },
+    provider_compatibility: { status: { rows_needing_reconcile: 0 } },
+    repair: { ok: true, skipped: true, reason: "enhanced_reuse_keeps_existing_chat_state" },
+    launch: { method: "enhancer_runtime" },
+  });
+  prelaunchEnvironmentMock.mockReset();
+  prelaunchEnvironmentMock.mockResolvedValue({
+    ok: true,
+    codexHome: { path: "C:/Users/test/.codex", exists: true },
+    config: {
+      path: "C:/Users/test/.codex/config.toml",
+      exists: true,
+      modelProvider: "openai",
+      hybridProviderConfigured: false,
+      hybridProviderKey: null,
+      authMode: "chatgpt",
+      authPath: { path: "C:/Users/test/.codex/auth.json", exists: true },
+      statePath: { path: "C:/Users/test/.codex/state_5.sqlite", exists: true },
+    },
+    bridge: {
+      programPath: "D:/repo/prelaunch_bridge.exe",
+      scriptPath: "D:/repo/prelaunch_bridge.py",
+      exePath: "D:/repo/prelaunch_bridge.exe",
+      usesExe: true,
+      available: true,
+    },
+    runtimes: {
+      python: { path: "D:/Tools/Python312/pythonw.exe", source: "bundled" },
+      threadripper: "D:/repo/codex-threadripper.exe",
+      threadripperAvailable: true,
+    },
+    codexDesktop: {
+      productResolvedExe: "C:/Program Files/WindowsApps/OpenAI.Codex/app/Codex.exe",
+      productResolvedSource: "installed",
+      appid: null,
+      lastResortExe: null,
+      launchAvailable: true,
+      running: false,
+    },
+    runtime: { ok: true, codex_running: false, processes: [] },
+    blockers: [],
+    warnings: [],
+  });
   prelaunchRepairMock.mockReset();
   prelaunchRepairMock.mockResolvedValue({
     ok: true,
@@ -201,6 +255,18 @@ function fillProviderForm() {
   fireEvent.change(screen.getByLabelText("Env Key"), { target: { value: providerPayload.env_key } });
 }
 
+function clickEnhancedLaunch() {
+  fireEvent.click(screen.getByRole("button", { name: "启动并加载" }));
+}
+
+function clickRepair() {
+  fireEvent.click(screen.getByRole("button", { name: "修复历史" }));
+}
+
+function openAdvancedRecoveryOptions() {
+  fireEvent.click(screen.getByRole("button", { name: "显示高级恢复选项" }));
+}
+
 describe("LoginRepairPage", () => {
   it("renders the current prelaunch status summary", async () => {
     renderPage();
@@ -208,7 +274,7 @@ describe("LoginRepairPage", () => {
     expect(await screen.findByText("chatgpt")).toBeInTheDocument();
     expect(screen.getByText("模型通道")).toBeInTheDocument();
     expect(screen.getByText("0")).toBeInTheDocument();
-    expect(screen.getAllByText("openai")).toHaveLength(2);
+    expect(screen.getAllByText("openai").length).toBeGreaterThanOrEqual(2);
     expect(prelaunchStatusMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME);
   });
 
@@ -234,15 +300,15 @@ describe("LoginRepairPage", () => {
     expect(screen.queryByRole("button", { name: "只检查状态" })).not.toBeInTheDocument();
     expect(screen.queryByText("隐藏 Codex 官方额度提醒")).not.toBeInTheDocument();
 
-    const firstAction = screen.getByText("增强登录").closest(".rounded-2xl");
-    const repairCard = screen.getByText("修复恢复").closest(".rounded-2xl");
+    const firstAction = screen.getByText("API 供应商启动").closest(".rounded-2xl");
+    const repairCard = screen.getByText("历史恢复").closest(".rounded-2xl");
     const firstStatus = screen.getByText("登录态").closest(".rounded-2xl");
 
     expect(screen.getByText("API 供应商启动")).toBeInTheDocument();
-    expect(screen.getByText("混合登录")).toBeInTheDocument();
-    expect(screen.getByText("复用上次混合登录保存的官方账号 + Relay 配置，不需要重复填写 Provider 信息。")).toBeInTheDocument();
-    expect(screen.getByText("官方账号 + API（第三方也行）同时登录，保持插件等原生功能。")).toBeInTheDocument();
-    expect(screen.getByText("修复恢复")).toBeInTheDocument();
+    expect(screen.getByText("混合登录启动")).toBeInTheDocument();
+    expect(screen.getByText("增强启动")).toBeInTheDocument();
+    expect(screen.getByText("启动已登录的 Codex，并加载插件和增强功能。")).toBeInTheDocument();
+    expect(screen.getByText("历史恢复")).toBeInTheDocument();
     expect(firstAction?.compareDocumentPosition(firstStatus as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(firstAction?.compareDocumentPosition(repairCard as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
@@ -256,12 +322,12 @@ describe("LoginRepairPage", () => {
     expect(screen.getByText("status failed")).toBeInTheDocument();
   });
 
-  it("launches enhanced mode by reusing the configured hybrid relay provider", async () => {
+  it("launches enhanced mode through the enhanced launch API", async () => {
     prelaunchStatusMock.mockResolvedValueOnce(hybridRelayStatus);
-    prelaunchLaunchMock.mockResolvedValueOnce({
+    prelaunchEnhancedLaunchMock.mockResolvedValueOnce({
       ok: true,
-      mode: "hybrid",
-      report_dir: "D:/repo/reports/20260522-123456-配置并启动-hybrid",
+      mode: "existing-session",
+      report_dir: "D:/repo/reports/20260522-123456-增强启动",
       provider_config: { target_model_provider: "codexzh" },
       provider_compatibility: { status: { rows_needing_reconcile: 0 } },
       sync: { status: { rows_needing_reconcile: 0 } },
@@ -272,44 +338,44 @@ describe("LoginRepairPage", () => {
     renderPage();
 
     await screen.findByText("chatgpt");
-    fireEvent.click(screen.getByRole("button", { name: "直接启动" }));
+    clickEnhancedLaunch();
 
-    expect(await screen.findByText("D:/repo/reports/20260522-123456-配置并启动-hybrid")).toBeInTheDocument();
+    expect(await screen.findByText("D:/repo/reports/20260522-123456-增强启动")).toBeInTheDocument();
     expect(screen.getAllByText("codexzh").length).toBeGreaterThan(0);
     expect(screen.getByText("enhancer_runtime")).toBeInTheDocument();
-    expect(prelaunchLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, "hybrid", null, false, false);
+    expect(prelaunchEnhancedLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME);
   });
 
-  it("blocks enhanced login when only official account state is available", async () => {
+  it("allows enhanced launch when only official account state is available", async () => {
     renderPage();
 
     await screen.findByText("chatgpt");
-    fireEvent.click(screen.getByRole("button", { name: "直接启动" }));
+    clickEnhancedLaunch();
 
-    expect(screen.getByText("增强登录需要先保存混合登录信息：当前只检测到官方账号，请先使用混合登录填写 Relay/API 信息。")).toBeInTheDocument();
-    expect(prelaunchRuntimeStatusMock).not.toHaveBeenCalled();
-    expect(prelaunchLaunchMock).not.toHaveBeenCalled();
+    expect(await screen.findByText("D:/repo/reports/20260522-123456-增强启动")).toBeInTheDocument();
+    expect(prelaunchRuntimeStatusMock).toHaveBeenCalled();
+    expect(prelaunchEnhancedLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME);
   });
 
-  it("blocks enhanced login when relay exists without official account state", async () => {
+  it("allows enhanced launch when relay exists without official account state", async () => {
     prelaunchStatusMock.mockResolvedValueOnce(apiOnlyRelayStatus);
 
     renderPage();
 
     await screen.findByText("apikey");
-    fireEvent.click(screen.getByRole("button", { name: "直接启动" }));
+    clickEnhancedLaunch();
 
-    expect(screen.getByText("增强登录需要官方账号和 Relay/API 混合信息：当前只检测到 Relay/API 配置，请先完成官方账号登录并用混合登录保存一次。")).toBeInTheDocument();
-    expect(prelaunchRuntimeStatusMock).not.toHaveBeenCalled();
-    expect(prelaunchLaunchMock).not.toHaveBeenCalled();
+    expect(await screen.findByText("D:/repo/reports/20260522-123456-增强启动")).toBeInTheDocument();
+    expect(prelaunchRuntimeStatusMock).toHaveBeenCalled();
+    expect(prelaunchEnhancedLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME);
   });
 
   it("shows repair summary for enhanced relay launch", async () => {
     prelaunchStatusMock.mockResolvedValueOnce(hybridRelayStatus);
-    prelaunchLaunchMock.mockResolvedValueOnce({
+    prelaunchEnhancedLaunchMock.mockResolvedValueOnce({
       ok: true,
-      mode: "hybrid",
-      report_dir: "D:/repo/reports/20260522-123456-配置并启动-hybrid",
+      mode: "existing-session",
+      report_dir: "D:/repo/reports/20260522-123456-增强启动",
       provider_config: { target_model_provider: "codexzh" },
       provider_compatibility: { status: { rows_needing_reconcile: 0 } },
       sync: { status: { rows_needing_reconcile: 0 } },
@@ -320,9 +386,9 @@ describe("LoginRepairPage", () => {
     renderPage();
 
     await screen.findByText("chatgpt");
-    fireEvent.click(screen.getByRole("button", { name: "直接启动" }));
+    clickEnhancedLaunch();
 
-    expect(await screen.findByText("D:/repo/reports/20260522-123456-配置并启动-hybrid")).toBeInTheDocument();
+    expect(await screen.findByText("D:/repo/reports/20260522-123456-增强启动")).toBeInTheDocument();
     expect(screen.getByText("归属分析摘要")).toBeInTheDocument();
     expect(screen.getAllByText("恢复 workspace 数").length).toBeGreaterThan(0);
   });
@@ -419,7 +485,7 @@ describe("LoginRepairPage", () => {
     });
   });
 
-  it("still forwards the quota notice flag for enhanced relay launch", async () => {
+  it("uses the enhanced launch API and still forwards the quota notice flag for API launch", async () => {
     prelaunchStatusMock.mockResolvedValueOnce(hybridRelayStatus);
     getEnhancerSettingsMock.mockResolvedValueOnce({
       chatInfoMoveEnabled: false,
@@ -431,20 +497,21 @@ describe("LoginRepairPage", () => {
     renderPage();
 
     await screen.findByText("chatgpt");
-    fireEvent.click(screen.getByRole("button", { name: "直接启动" }));
+    clickEnhancedLaunch();
     await waitFor(() => {
-      expect(prelaunchLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, "hybrid", null, true, false);
+      expect(prelaunchEnhancedLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME);
     });
 
     fireEvent.click(screen.getAllByRole("button", { name: "填写信息" })[0]);
     fillProviderForm();
     fireEvent.click(screen.getByRole("button", { name: "确认并启动 API 供应商启动" }));
 
-    expect(await screen.findByText("D:/repo/reports/20260522-123456-配置并启动-hybrid")).toBeInTheDocument();
-    expect(prelaunchLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, "api", providerPayload, true, false);
+    await waitFor(() => {
+      expect(prelaunchLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, "api", providerPayload, true, false);
+    });
   });
 
-  it("warns and blocks launch when Codex is still running until the user decides", async () => {
+  it("warns and blocks enhanced launch when Codex is still running until the user decides", async () => {
     prelaunchRuntimeStatusMock.mockResolvedValueOnce({
       ok: true,
       codex_running: true,
@@ -454,42 +521,44 @@ describe("LoginRepairPage", () => {
     renderPage();
 
     await screen.findByText("chatgpt");
-    fireEvent.click(screen.getAllByRole("button", { name: "填写信息" })[0]);
-    fillProviderForm();
-    fireEvent.click(screen.getByRole("button", { name: "确认并启动 API 供应商启动" }));
+    clickEnhancedLaunch();
 
-    expect(await screen.findByText("Codex 正在运行")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "我自己关闭" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "帮我关闭并继续" })).toBeInTheDocument();
-    expect(screen.getByText(/Codex\.exe/)).toBeInTheDocument();
-    expect(prelaunchLaunchMock).not.toHaveBeenCalled();
+    expect(await screen.findByText("需要重启 Codex")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "取消" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "停止并重新启动" })).toBeInTheDocument();
+    expect(screen.getAllByText(/Codex\.exe/).length).toBeGreaterThan(0);
+    expect(prelaunchEnhancedLaunchMock).not.toHaveBeenCalled();
   });
 
-  it("can stop Codex and continue the pending API launch action", async () => {
-    prelaunchRuntimeStatusMock.mockResolvedValueOnce({
-      ok: true,
-      codex_running: true,
-      processes: [{ image: "Codex.exe", pid: 1234 }],
-    });
+  it("can stop Codex and continue the pending enhanced launch action", async () => {
+    prelaunchRuntimeStatusMock
+      .mockResolvedValueOnce({
+        ok: true,
+        codex_running: true,
+        processes: [{ image: "Codex.exe", pid: 1234 }],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        codex_running: false,
+        processes: [],
+      });
 
     renderPage();
 
     await screen.findByText("chatgpt");
-    fireEvent.click(screen.getAllByRole("button", { name: "填写信息" })[0]);
-    fillProviderForm();
-    fireEvent.click(screen.getByRole("button", { name: "确认并启动 API 供应商启动" }));
-    fireEvent.click(await screen.findByRole("button", { name: "帮我关闭并继续" }));
+    clickEnhancedLaunch();
+    fireEvent.click(await screen.findByRole("button", { name: "停止并重新启动" }));
 
-    expect(await screen.findByText("D:/repo/reports/20260522-123456-配置并启动-hybrid")).toBeInTheDocument();
+    expect(await screen.findByText("D:/repo/reports/20260522-123456-增强启动")).toBeInTheDocument();
     expect(prelaunchStopRuntimeMock).toHaveBeenCalledTimes(1);
-    expect(prelaunchLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, "api", providerPayload, false, false);
+    expect(prelaunchEnhancedLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME);
   });
 
   it("runs repair from the login and repair module", async () => {
     renderPage();
 
     await screen.findByText("chatgpt");
-    fireEvent.click(screen.getByRole("button", { name: "开始修复" }));
+    clickRepair();
 
     expect(await screen.findByText("D:/repo/reports/20260522-123456-修复恢复-repair")).toBeInTheDocument();
     expect(screen.getByText("53")).toBeInTheDocument();
@@ -500,13 +569,14 @@ describe("LoginRepairPage", () => {
     renderPage();
 
     await screen.findByText("chatgpt");
+    openAdvancedRecoveryOptions();
     fireEvent.click(screen.getByRole("switch", { name: "包含归档聊天" }));
     fireEvent.click(screen.getByRole("switch", { name: "允许缺失 cwd" }));
     fireEvent.click(screen.getByRole("switch", { name: "允许空 workspace" }));
     fireEvent.click(screen.getByRole("switch", { name: "允许缺失 session" }));
     fireEvent.click(screen.getByRole("switch", { name: "恢复到 projectless" }));
     fireEvent.click(screen.getByRole("switch", { name: "取消归档选中聊天" }));
-    fireEvent.click(screen.getByRole("button", { name: "开始修复" }));
+    clickRepair();
 
     expect(await screen.findByText("D:/repo/reports/20260522-123456-修复恢复-repair")).toBeInTheDocument();
     expect(prelaunchRepairMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, {
@@ -532,7 +602,7 @@ describe("LoginRepairPage", () => {
   it("does not place login and repair actions inside the dashboard", () => {
     render(<OverviewPage />);
 
-    expect(screen.queryByRole("button", { name: /配置并启动|开始修复|进入登录与修复/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /配置并启动|修复历史|进入登录与修复/ })).not.toBeInTheDocument();
     expect(screen.queryByText("官方账号启动")).not.toBeInTheDocument();
     expect(screen.queryByText("API 供应商启动")).not.toBeInTheDocument();
     expect(screen.queryByText("混合登录")).not.toBeInTheDocument();
