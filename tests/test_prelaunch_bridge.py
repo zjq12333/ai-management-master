@@ -244,13 +244,26 @@ class PrelaunchBridgeTests(unittest.TestCase):
 
     def test_launch_codex_desktop_focuses_existing_visible_window(self):
         running = [{"pid": 4242, "image": "Codex.exe", "exe": "C:/Program Files/WindowsApps/OpenAI.Codex/app/Codex.exe"}]
+        popen_calls = []
+
+        def fake_popen(command, *args, **kwargs):
+            popen_calls.append(command)
+            if isinstance(command, list) and command and command[0] == "explorer.exe":
+                raise AssertionError("explorer.exe must not be called when a visible Codex window already exists")
+            process = mock.Mock()
+            process.communicate.return_value = ("", "")
+            process.returncode = 0
+            return process
+
         with mock.patch("prelaunch_manager.desktop_codex_running_processes", return_value=running), mock.patch(
             "prelaunch_manager.prepare_codex_takeover"
         ) as takeover, mock.patch("prelaunch_manager.focus_codex_window", return_value={"ok": True}) as focus, mock.patch(
             "prelaunch_manager.find_codex_desktop_appid", return_value="OpenAI.Codex_abc!App"
         ), mock.patch("prelaunch_manager.visible_codex_window_pids", return_value=[4242]), mock.patch.object(
-            prelaunch_manager.subprocess, "Popen", wraps=prelaunch_manager.subprocess.Popen
-        ) as popen:
+            prelaunch_manager.subprocess,
+            "Popen",
+            side_effect=fake_popen,
+        ):
             payload = prelaunch_manager.launch_codex_desktop()
 
         self.assertTrue(payload["ok"])
@@ -259,7 +272,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertEqual(payload["foreground"]["ok"], True)
         takeover.assert_not_called()
         focus.assert_called_once_with(4242)
-        self.assertNotIn(["explorer.exe", "shell:AppsFolder\\OpenAI.Codex_abc!App"], [call.args[0] for call in popen.call_args_list])
+        self.assertNotIn(["explorer.exe", "shell:AppsFolder\\OpenAI.Codex_abc!App"], popen_calls)
 
     def test_launch_codex_desktop_reactivates_existing_process_without_visible_window(self):
         running = [{"pid": 4242, "image": "Codex.exe", "exe": "C:/Program Files/WindowsApps/OpenAI.Codex/app/Codex.exe"}]
@@ -1548,6 +1561,39 @@ class PrelaunchBridgeTests(unittest.TestCase):
             self.assertTrue(runtime_script.exists())
             self.assertTrue((runtime_script.parent / "enhancer_renderer_inject.js").exists())
             self.assertTrue((runtime_script.parent / "enhancer_runtime_watcher.py").exists())
+
+    def test_stable_enhancer_runtime_script_refreshes_local_app_data_copy(self):
+        with tempfile.TemporaryDirectory() as repo_dir, tempfile.TemporaryDirectory() as local_app_data:
+            repo_path = Path(repo_dir)
+            stable_dir = Path(local_app_data) / "AI-Strategist" / "enhancer-runtime"
+            stable_dir.mkdir(parents=True)
+            modules = (
+                "enhancer_runtime.py",
+                "enhancer_renderer_inject.js",
+                "enhancer_runtime_watcher.py",
+                "enhancer_handoff.py",
+                "repair_codex_desktop_history.py",
+                "prelaunch_manager.py",
+                "codex_desktop_launcher.py",
+                "codex_desktop_app_paths.py",
+            )
+            for name in modules:
+                (repo_path / name).write_text(f"# fresh {name}\n", encoding="utf-8")
+                (stable_dir / name).write_text(f"# stale {name}\n", encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": local_app_data}, clear=False), mock.patch.object(
+                prelaunch_manager,
+                "__file__",
+                str(repo_path / "prelaunch_manager.py"),
+            ):
+                runtime_script = prelaunch_manager.stable_enhancer_runtime_script(stable_dir / "enhancer_runtime.py")
+
+            self.assertEqual(runtime_script, stable_dir / "enhancer_runtime.py")
+            self.assertEqual(runtime_script.read_text(encoding="utf-8"), "# fresh enhancer_runtime.py\n")
+            self.assertEqual(
+                (runtime_script.parent / "codex_desktop_launcher.py").read_text(encoding="utf-8"),
+                "# fresh codex_desktop_launcher.py\n",
+            )
 
     def test_enhancer_runtime_launch_options_hide_console_windows(self):
         options = prelaunch_manager.enhancer_runtime_launch_options()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -64,12 +65,39 @@ def enhancer_attach_delay_seconds() -> float:
     return ENHANCER_ATTACH_DELAY_SECONDS
 
 
-def wait_before_attach(log_file: str | None) -> None:
+def wait_before_attach(log_file: str | None, debug_port: int | None = None) -> None:
     delay = enhancer_attach_delay_seconds()
     if delay <= 0:
         return
-    append_runtime_log(log_file, f"waiting {delay:.1f}s before enhancer attach")
-    time.sleep(delay)
+    start = time.monotonic()
+    deadline = start + delay
+    if debug_port is None:
+        append_runtime_log(log_file, f"waiting {delay:.1f}s before enhancer attach")
+        time.sleep(delay)
+        return
+
+    append_runtime_log(log_file, f"waiting up to {delay:.1f}s for Codex target before enhancer attach")
+    last_error = ""
+    while time.monotonic() < deadline:
+        try:
+            targets = codex_page_targets(debug_port)
+            if targets:
+                elapsed = time.monotonic() - start
+                append_runtime_log(
+                    log_file,
+                    f"Codex target ready after {elapsed:.2f}s on debug port {debug_port}",
+                )
+                return
+        except Exception as exc:
+            last_error = repr(exc)
+        time.sleep(0.2)
+
+    elapsed = time.monotonic() - start
+    suffix = f"; last_error={last_error}" if last_error else ""
+    append_runtime_log(
+        log_file,
+        f"Codex target not observed after {elapsed:.2f}s on debug port {debug_port}; attaching anyway{suffix}",
+    )
 
 
 def list_targets(port: int) -> list[dict[str, object]]:
@@ -271,6 +299,27 @@ def debug_args(debug_port: int) -> list[str]:
     ]
 
 
+def remote_debugging_port_from_command_line(command_line: str) -> int | None:
+    match = re.search(r"--remote-debugging-port(?:=|\s+)(\d+)", command_line or "")
+    if not match:
+        return None
+    try:
+        port = int(match.group(1))
+    except ValueError:
+        return None
+    if 0 < port <= 65535:
+        return port
+    return None
+
+
+def existing_codex_debug_port() -> int | None:
+    for process in desktop_codex_running_processes():
+        port = remote_debugging_port_from_command_line(str(process.get("command_line") or ""))
+        if port is not None and cdp_available(port):
+            return port
+    return None
+
+
 def attach_to_codex(codex_home: Path, debug_port: int) -> tuple[list[websocket.WebSocket], set[str]]:
     script = load_injection_script()
     settings = load_enhancer_settings(codex_home).get("enhancer", {})
@@ -365,7 +414,11 @@ def takeover_and_attach(
     current_port = int(debug_port_ref["value"])
     append_runtime_log(log_file, f"watcher relaunch requested on debug port {current_port}")
 
-    launch = launch_codex_desktop_with_retry(debug_args(current_port), attempts=3)
+    launch = launch_codex_desktop_with_retry(
+        debug_args(current_port),
+        attempts=3,
+        allow_takeover=True,
+    )
     if not launch.get("ok"):
         append_runtime_log(log_file, f"watcher relaunch failed: {launch}")
         return False
@@ -402,6 +455,11 @@ def main() -> int:
     parser.add_argument("--launch-mode", default="official")
     parser.add_argument("--status-file", default="")
     parser.add_argument("--log-file", default="")
+    parser.add_argument(
+        "--allow-runtime-takeover",
+        action="store_true",
+        help="Allow the background watcher to restart an already-running Codex process to recover CDP.",
+    )
     args = parser.parse_args()
 
     codex_home = history_repair.normalize_path(args.codex_home)
@@ -417,9 +475,10 @@ def main() -> int:
                 {
                     "pid": os.getpid(),
                     "python": sys.executable,
-                    "launch_mode": args.launch_mode,
-                    "debug_port": args.debug_port,
-                    "codex_home": str(codex_home),
+                "launch_mode": args.launch_mode,
+                "debug_port": args.debug_port,
+                "allow_runtime_takeover": args.allow_runtime_takeover,
+                "codex_home": str(codex_home),
                     "resolved_codex_desktop": os.environ.get("AI_STRATEGIST_CODEX_DESKTOP"),
                     "resolved_python_runtime": os.environ.get("AI_STRATEGIST_PYTHON_RUNTIME"),
                 },
@@ -444,13 +503,26 @@ def main() -> int:
             append_runtime_log(args.log_file, "existing-session launch keeps current Codex provider and login state")
 
         phase = "desktop-launch"
-        launch = launch_codex_desktop_with_retry(
-            [
-                f"--remote-debugging-port={args.debug_port}",
-                f"--remote-allow-origins=http://127.0.0.1:{args.debug_port}",
-            ],
-            attempts=3,
-        )
+        existing_debug_port = existing_codex_debug_port()
+        if existing_debug_port is not None:
+            launch = {
+                "ok": True,
+                "method": "existing_cdp",
+                "debug_port": existing_debug_port,
+                "skipped_launch": True,
+            }
+            append_runtime_log(
+                args.log_file,
+                f"using existing Codex CDP on debug port {existing_debug_port}; skipping desktop activation",
+            )
+        else:
+            launch = launch_codex_desktop_with_retry(
+                [
+                    f"--remote-debugging-port={args.debug_port}",
+                    f"--remote-allow-origins=http://127.0.0.1:{args.debug_port}",
+                ],
+                attempts=3,
+            )
         append_runtime_log(args.log_file, f"launch result: {json.dumps(launch, ensure_ascii=False)}")
         if not launch.get("ok"):
             write_status_file(args.status_file, dict(launch))
@@ -459,7 +531,7 @@ def main() -> int:
 
         actual_debug_port = int(launch.get("debug_port") or args.debug_port)
         phase = "attach-delay"
-        wait_before_attach(args.log_file)
+        wait_before_attach(args.log_file, actual_debug_port)
         phase = "attach-to-codex"
         sockets, seen = attach_to_codex(codex_home, actual_debug_port)
         append_runtime_log(
@@ -478,27 +550,30 @@ def main() -> int:
             daemon=True,
         )
         page_watcher.start()
-        runtime_watcher = threading.Thread(
-            target=enhancer_runtime_watcher.watch_loop,
-            kwargs={
-                "cdp_listening": lambda: cdp_available(int(debug_port_ref["value"])),
-                "codex_pids": lambda: [
-                    process["pid"]
-                    for process in desktop_codex_running_processes()
-                    if isinstance(process.get("pid"), int)
-                ],
-                "takeover": lambda: takeover_and_attach(
-                    codex_home,
-                    debug_port_ref,
-                    sockets_ref,
-                    seen_ref,
-                    attachment_lock,
-                    args.log_file,
-                ),
-            },
-            daemon=True,
-        )
-        runtime_watcher.start()
+        if args.allow_runtime_takeover:
+            runtime_watcher = threading.Thread(
+                target=enhancer_runtime_watcher.watch_loop,
+                kwargs={
+                    "cdp_listening": lambda: cdp_available(int(debug_port_ref["value"])),
+                    "codex_pids": lambda: [
+                        process["pid"]
+                        for process in desktop_codex_running_processes()
+                        if isinstance(process.get("pid"), int)
+                    ],
+                    "takeover": lambda: takeover_and_attach(
+                        codex_home,
+                        debug_port_ref,
+                        sockets_ref,
+                        seen_ref,
+                        attachment_lock,
+                        args.log_file,
+                    ),
+                },
+                daemon=True,
+            )
+            runtime_watcher.start()
+        else:
+            append_runtime_log(args.log_file, "runtime takeover watcher disabled")
         write_status_file(
             args.status_file,
             {

@@ -615,6 +615,21 @@ def stable_enhancer_runtime_dir() -> Path:
     return Path(tempfile.gettempdir()) / "AI-Strategist" / "enhancer-runtime"
 
 
+def source_enhancer_runtime_dir(source: Path) -> Path:
+    source_dir = source.resolve().parent
+    stable_dir = stable_enhancer_runtime_dir().resolve()
+    try:
+        source_dir.relative_to(stable_dir)
+    except ValueError:
+        return source_dir
+
+    repo_root = Path(__file__).resolve().parent
+    repo_runtime = repo_root / "enhancer_runtime.py"
+    if repo_runtime.exists():
+        return repo_root
+    return source_dir
+
+
 def is_pyinstaller_temp_path(path: Path) -> bool:
     resolved = path.resolve()
     meipass = getattr(sys, "_MEIPASS", None)
@@ -629,7 +644,8 @@ def is_pyinstaller_temp_path(path: Path) -> bool:
 
 def stable_enhancer_runtime_script(source_script: Path | None = None) -> Path:
     source = source_script or Path(__file__).resolve().with_name("enhancer_runtime.py")
-    if not is_pyinstaller_temp_path(source):
+    source_dir = source_enhancer_runtime_dir(source)
+    if not is_pyinstaller_temp_path(source) and source_dir == source.resolve().parent:
         return source
     target_dir = stable_enhancer_runtime_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -644,7 +660,7 @@ def stable_enhancer_runtime_script(source_script: Path | None = None) -> Path:
         "codex_desktop_app_paths.py",
     ]
     for module_name in module_names:
-        source_path = source.with_name(module_name)
+        source_path = source_dir / module_name
         if source_path.exists():
             shutil.copy2(source_path, target_dir / module_name)
     return target_dir / "enhancer_runtime.py"

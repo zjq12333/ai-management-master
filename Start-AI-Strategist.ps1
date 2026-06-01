@@ -98,6 +98,30 @@ function Show-Window($window) {
     [void][AiStrategistWindow]::SetForegroundWindow($window.Handle)
 }
 
+function Wait-ForMainWindow {
+    param(
+        $Process,
+        [double]$TimeoutSeconds = 3.0
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $Process.Refresh()
+        if ($Process.HasExited) {
+            return $null
+        }
+
+        $window = Get-BestWindow $Process
+        if ($null -ne $window) {
+            return $window
+        }
+
+        Start-Sleep -Milliseconds 150
+    } while ((Get-Date) -lt $deadline)
+
+    return $null
+}
+
 $existing = @(Get-Process -Name "AI-Strategist" -ErrorAction SilentlyContinue)
 foreach ($process in $existing) {
     $window = Get-BestWindow $process
@@ -114,20 +138,18 @@ if (Test-Path -LiteralPath $primaryExe) {
     Write-LaunchLog "Starting primary executable: $primaryExe"
     Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
     $started = Start-Process -FilePath $primaryExe -WorkingDirectory $resolvedRoot -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-    Start-Sleep -Seconds 2
     $started.Refresh()
     Write-LaunchLog "Primary executable started. PID=$($started.Id) HasExited=$($started.HasExited)"
-    $window = Get-BestWindow $started
+    $window = Wait-ForMainWindow -Process $started -TimeoutSeconds 3.0
     if ($null -ne $window) {
         Write-LaunchLog "Found started window. PID=$($started.Id) Window=$(Format-Window $window)"
         Show-Window $window
-        Start-Sleep -Seconds 3
         $started.Refresh()
         $exitCode = if ($started.HasExited) { $started.ExitCode } else { "<running>" }
-        Write-LaunchLog "Post-window health. PID=$($started.Id) HasExited=$($started.HasExited) ExitCode=$exitCode"
+        Write-LaunchLog "Post-window status. PID=$($started.Id) HasExited=$($started.HasExited) ExitCode=$exitCode"
     } else {
         $exitCode = if ($started.HasExited) { $started.ExitCode } else { "<running>" }
-        Write-LaunchLog "Started process has no visible main window yet. PID=$($started.Id) HasExited=$($started.HasExited) ExitCode=$exitCode"
+        Write-LaunchLog "Started process has no visible main window after short wait. PID=$($started.Id) HasExited=$($started.HasExited) ExitCode=$exitCode"
         if (Test-Path -LiteralPath $stderrPath) {
             $stderrTail = (Get-Content -LiteralPath $stderrPath -Tail 20 -ErrorAction SilentlyContinue) -join " | "
             if (-not [string]::IsNullOrWhiteSpace($stderrTail)) {
