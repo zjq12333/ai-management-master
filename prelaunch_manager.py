@@ -63,6 +63,20 @@ CODEX_DESKTOP_NOTICE_STATE_FILE = "ai-strategist-prelaunch-notice-state.json"
 CDP_NOT_READY_ERROR_FRAGMENT = "CDP did not come up"
 CDP_WAIT_TIMEOUT_SECONDS = 25.0
 ENHANCER_READY_STABLE_SECONDS = 3.0
+MUST_INSTALL_PLUGIN_SPECS = [
+    {
+        "id": "browser@openai-bundled",
+        "marketplace": "openai-bundled",
+        "name": "browser",
+        "readiness": "bundled",
+    },
+    {
+        "id": "chrome@openai-bundled",
+        "marketplace": "openai-bundled",
+        "name": "chrome",
+        "readiness": "chrome",
+    },
+]
 
 
 def windows_system_tool(name: str) -> str:
@@ -300,12 +314,22 @@ def ensure_must_install_local_plugins(codex_home: Path) -> dict[str, object]:
     raw = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     plugins_to_enable: list[str] = []
     readiness_errors: list[str] = []
-    if bundled_plugin_locally_ready(codex_home, "browser"):
-        plugins_to_enable.append("browser@openai-bundled")
-    else:
-        readiness_errors.append("browser_plugin_not_locally_ready")
-    if chrome_plugin_locally_ready(codex_home):
-        plugins_to_enable.append("chrome@openai-bundled")
+    for spec in MUST_INSTALL_PLUGIN_SPECS:
+        plugin_id = str(spec["id"])
+        plugin_name = str(spec["name"])
+        readiness = str(spec["readiness"])
+        if readiness == "bundled":
+            if bundled_plugin_locally_ready(codex_home, plugin_name):
+                plugins_to_enable.append(plugin_id)
+            else:
+                readiness_errors.append(f"{plugin_id}_not_locally_ready")
+        elif readiness == "chrome":
+            if chrome_plugin_locally_ready(codex_home):
+                plugins_to_enable.append(plugin_id)
+            else:
+                readiness_errors.append(f"{plugin_id}_not_locally_ready")
+        else:
+            readiness_errors.append(f"{plugin_id}_unsupported_readiness_{readiness}")
 
     if not plugins_to_enable:
         return {"enabled": True, "changed": False, "plugins": [], "errors": readiness_errors}

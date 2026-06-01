@@ -149,7 +149,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
                 config_path.read_text(encoding="utf-8"),
             )
 
-    def test_ensure_must_install_enables_browser_plugin_when_cached(self):
+    def test_ensure_must_install_enables_ready_bundled_plugins(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             codex_home = Path(temp_dir)
             settings_path = codex_home / "codexmate" / "settings.json"
@@ -170,15 +170,35 @@ class PrelaunchBridgeTests(unittest.TestCase):
             )
             plugin_manifest.parent.mkdir(parents=True)
             plugin_manifest.write_text("{}", encoding="utf-8")
+            chrome_scripts = (
+                codex_home
+                / "plugins"
+                / "cache"
+                / "openai-bundled"
+                / "chrome"
+                / "26.519.41501"
+                / "scripts"
+            )
+            chrome_scripts.mkdir(parents=True)
+            (chrome_scripts.parent / ".codex-plugin").mkdir()
+            (chrome_scripts.parent / ".codex-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+            (chrome_scripts / "check-extension-installed.js").write_text("", encoding="utf-8")
+            (chrome_scripts / "check-native-host-manifest.js").write_text("", encoding="utf-8")
 
-            result = prelaunch_manager.ensure_must_install_local_plugins(codex_home)
+            with mock.patch.object(prelaunch_manager.subprocess, "run", return_value=mock.Mock(returncode=0)):
+                result = prelaunch_manager.ensure_must_install_local_plugins(codex_home)
 
             self.assertTrue(result["enabled"])
             self.assertTrue(result["changed"])
-            self.assertEqual(result["plugins"], ["browser@openai-bundled"])
+            self.assertEqual(result["plugins"], ["browser@openai-bundled", "chrome@openai-bundled"])
+            config_text = (codex_home / "config.toml").read_text(encoding="utf-8")
             self.assertIn(
                 '[plugins."browser@openai-bundled"]\nenabled = true',
-                (codex_home / "config.toml").read_text(encoding="utf-8"),
+                config_text,
+            )
+            self.assertIn(
+                '[plugins."chrome@openai-bundled"]\nenabled = true',
+                config_text,
             )
 
     def test_prepare_report_dir_uses_product_managed_reports_root(self):

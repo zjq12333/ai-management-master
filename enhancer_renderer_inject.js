@@ -76,8 +76,17 @@
 
   function pluginInstallCandidates() {
     return Array.from(document.querySelectorAll([
+      "button:disabled",
       "button:disabled.w-full.justify-center",
+      "button[aria-disabled='true']",
+      "[role='button'][aria-disabled='true']",
+      "button[data-disabled]",
+      "[role='button'][data-disabled]",
+      "button.cursor-not-allowed",
       "[role='button'][aria-disabled='true'].cursor-not-allowed",
+      "[role='button'].cursor-not-allowed",
+      "button.pointer-events-none",
+      "[role='button'].pointer-events-none",
     ].join(",")));
   }
 
@@ -145,13 +154,20 @@
   }
 
   function looksLikeInstallControl(button) {
-    return hasAnyText(installButtonLabel(button), ["install", "安装", "必须装"]);
+    const label = installButtonLabel(button);
+    if (hasAnyText(label, ["install", "add", "enable", "安装", "添加", "启用", "必须装"])) {
+      return true;
+    }
+    const card = button.closest("[role='dialog'], [data-radix-dialog-content], [data-testid*='plugin'], [data-testid*='connector'], article, li, div");
+    const cardText = visibleText(card?.textContent || "");
+    return hasAnyText(cardText, ["app unavailable", "connector unavailable", "应用不可用", "连接器不可用", "插件安装失败"]);
   }
 
   function unblockPluginInstallButton(button) {
     button.disabled = false;
     button.removeAttribute("disabled");
     button.removeAttribute("aria-disabled");
+    button.removeAttribute("data-disabled");
     button.classList.remove("disabled", "opacity-50", "cursor-not-allowed", "pointer-events-none");
     button.style.pointerEvents = "auto";
     button.tabIndex = 0;
@@ -160,6 +176,7 @@
     if (reactPropsKey) {
       button[reactPropsKey].disabled = false;
       button[reactPropsKey]["aria-disabled"] = false;
+      button[reactPropsKey]["data-disabled"] = false;
     }
   }
 
