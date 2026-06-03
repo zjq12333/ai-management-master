@@ -36,13 +36,40 @@ fn env_runtime_path(key: &str, source: ResolvedRuntimeSource) -> Option<Resolved
     std::env::var_os(key)
         .map(PathBuf::from)
         .filter(|path| path.exists())
-        .filter(|path| !(key == "AI_STRATEGIST_CODEX_DESKTOP" && is_windowsapps_codex_desktop_shim(path)))
         .map(|path| ResolvedRuntime { path, source })
 }
 
 fn is_windowsapps_codex_desktop_shim(path: &PathBuf) -> bool {
     let normalized = path.to_string_lossy().replace('/', "\\").to_lowercase();
     normalized.contains("\\windowsapps\\openai.codex_") && normalized.ends_with("\\app\\codex.exe")
+}
+
+#[cfg(target_os = "windows")]
+fn find_windowsapps_codex_desktop_exe() -> Option<PathBuf> {
+    let root = std::env::var_os("PROGRAMFILES")
+        .map(PathBuf::from)
+        .map(|path| path.join("WindowsApps"))?;
+    let mut candidates: Vec<PathBuf> = std::fs::read_dir(root)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let file_name = entry.file_name().to_string_lossy().to_lowercase();
+            if file_name.starts_with("openai.codex_") {
+                let candidate = entry.path().join("app").join("Codex.exe");
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
+            None
+        })
+        .collect();
+    candidates.sort_by(|a, b| b.cmp(a));
+    candidates.into_iter().next()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn find_windowsapps_codex_desktop_exe() -> Option<PathBuf> {
+    None
 }
 
 fn python_runtime_supports_modules(path: &PathBuf, modules: &[&str]) -> bool {
@@ -290,6 +317,12 @@ pub fn resolve_codex_desktop_exe() -> Option<ResolvedRuntime> {
         .map(|path| ResolvedRuntime {
             path,
             source: ResolvedRuntimeSource::ManagedLocal,
+        })
+        .or_else(|| {
+            find_windowsapps_codex_desktop_exe().map(|path| ResolvedRuntime {
+                path,
+                source: ResolvedRuntimeSource::ManagedLocal,
+            })
         })
         .or_else(|| {
             find_on_path("Codex.exe", false).map(|path| ResolvedRuntime {

@@ -17,6 +17,8 @@ const {
   prelaunchLaunchMock,
   prelaunchEnhancedLaunchMock,
   prelaunchRepairMock,
+  modelGatewaySnapshotMock,
+  modelRelayStatusMock,
 } = vi.hoisted(() => ({
   prelaunchStatusMock: vi.fn(),
   prelaunchEnvironmentMock: vi.fn(),
@@ -26,6 +28,8 @@ const {
   prelaunchLaunchMock: vi.fn(),
   prelaunchEnhancedLaunchMock: vi.fn(),
   prelaunchRepairMock: vi.fn(),
+  modelGatewaySnapshotMock: vi.fn(),
+  modelRelayStatusMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -38,18 +42,10 @@ vi.mock("@/lib/api", () => ({
     prelaunchLaunch: prelaunchLaunchMock,
     prelaunchEnhancedLaunch: prelaunchEnhancedLaunchMock,
     prelaunchRepair: prelaunchRepairMock,
+    modelGatewaySnapshot: modelGatewaySnapshotMock,
+    modelRelayStatus: modelRelayStatusMock,
   },
 }));
-
-const providerPayload = {
-  key: "cliproxy",
-  name: "CLIProxy",
-  base_url: "http://127.0.0.1:20128/v1",
-  wire_api: "responses",
-  env_key: "OPENAI_API_KEY",
-  requires_openai_auth: false,
-  experimental_bearer_token: "",
-};
 
 const hybridRelayStatus = {
   ok: true,
@@ -107,7 +103,6 @@ beforeEach(() => {
     chatInfoMoveEnabled: false,
     oneClickHandoffEnabled: false,
     hideOfficialQuotaNoticeEnabled: false,
-    mustInstallPluginsEnabled: false,
   });
   prelaunchRuntimeStatusMock.mockReset();
   prelaunchRuntimeStatusMock.mockResolvedValue({
@@ -120,6 +115,34 @@ beforeEach(() => {
     ok: true,
     killed: [],
     remaining: [],
+  });
+  modelGatewaySnapshotMock.mockReset();
+  modelGatewaySnapshotMock.mockResolvedValue({
+    schemaVersion: 1,
+    providers: [
+      {
+        id: "cliproxy",
+        name: "CLIProxy",
+        kind: "openai-compatible",
+        baseUrl: "https://upstream.example/v1",
+        defaultModel: "gpt-4.1",
+        enabled: true,
+      },
+    ],
+    defaultProviderId: "cliproxy",
+    configPath: "C:/Users/example/AppData/Roaming/AI Strategist/model-gateway.json",
+    relay: { enabled: true, port: 17431, autoStart: false, managementToken: "bucket-token" },
+    modelRoutes: [],
+    fallbackOrder: ["cliproxy"],
+    routingPolicy: "first-match-then-default",
+  });
+  modelRelayStatusMock.mockReset();
+  modelRelayStatusMock.mockResolvedValue({
+    enabled: true,
+    running: true,
+    port: 17431,
+    baseUrl: "http://127.0.0.1:17431",
+    configPath: "C:/Users/example/AppData/Roaming/AI Strategist/model-gateway.json",
   });
   prelaunchLaunchMock.mockReset();
   prelaunchLaunchMock.mockResolvedValue({
@@ -248,13 +271,6 @@ function renderPage() {
   );
 }
 
-function fillProviderForm() {
-  fireEvent.change(screen.getByLabelText("Provider Key"), { target: { value: providerPayload.key } });
-  fireEvent.change(screen.getByLabelText("Provider Name"), { target: { value: providerPayload.name } });
-  fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: providerPayload.base_url } });
-  fireEvent.change(screen.getByLabelText("Env Key"), { target: { value: providerPayload.env_key } });
-}
-
 function clickEnhancedLaunch() {
   fireEvent.click(screen.getByRole("button", { name: "启动并加载" }));
 }
@@ -273,23 +289,34 @@ describe("LoginRepairPage", () => {
 
     expect(await screen.findByText("chatgpt")).toBeInTheDocument();
     expect(screen.getByText("模型通道")).toBeInTheDocument();
-    expect(screen.getByText("0")).toBeInTheDocument();
     expect(screen.getAllByText("openai").length).toBeGreaterThanOrEqual(2);
     expect(prelaunchStatusMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME);
   });
 
-  it("shows provider input fields only after choosing API or mixed login", async () => {
+  it("starts API launch through the model bucket without provider fields", async () => {
     renderPage();
 
     await screen.findByText("chatgpt");
     expect(screen.queryByLabelText("Provider Key")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "填写信息" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "使用模型桶启动" })[0]);
 
-    expect(screen.getByLabelText("Provider Key")).toBeInTheDocument();
-    expect(screen.getByLabelText("Provider Name")).toBeInTheDocument();
-    expect(screen.getByLabelText("Base URL")).toBeInTheDocument();
-    expect(screen.getByLabelText("Env Key")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(prelaunchLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, "api", null, false, false);
+    });
+    expect(screen.queryByLabelText("Provider Key")).not.toBeInTheDocument();
+  });
+
+  it("shows model management as the only provider configuration source", async () => {
+    renderPage();
+
+    await screen.findByText("chatgpt");
+
+    expect(screen.getByText("Codex 连接本地统一模型入口；provider、路由和 token 在模型管理中治理。")).toBeInTheDocument();
+    expect(screen.getByText("保留官方登录态，同时使用本地模型桶；适合插件 + relay 双需求。")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Provider Key")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Experimental Bearer Token")).not.toBeInTheDocument();
   });
 
   it("places the login methods at the top without the login intro card", () => {
@@ -300,11 +327,11 @@ describe("LoginRepairPage", () => {
     expect(screen.queryByRole("button", { name: "只检查状态" })).not.toBeInTheDocument();
     expect(screen.queryByText("隐藏 Codex 官方额度提醒")).not.toBeInTheDocument();
 
-    const firstAction = screen.getByText("API 供应商启动").closest(".rounded-2xl");
+    const firstAction = screen.getByText("本地模型桶启动").closest(".rounded-2xl");
     const repairCard = screen.getByText("历史恢复").closest(".rounded-2xl");
     const firstStatus = screen.getByText("登录态").closest(".rounded-2xl");
 
-    expect(screen.getByText("API 供应商启动")).toBeInTheDocument();
+    expect(screen.getByText("本地模型桶启动")).toBeInTheDocument();
     expect(screen.getByText("混合登录启动")).toBeInTheDocument();
     expect(screen.getByText("增强启动")).toBeInTheDocument();
     expect(screen.getByText("启动已登录的 Codex，并加载插件和增强功能。")).toBeInTheDocument();
@@ -397,9 +424,7 @@ describe("LoginRepairPage", () => {
     renderPage();
 
     await screen.findByText("chatgpt");
-    fireEvent.click(screen.getAllByRole("button", { name: "填写信息" })[0]);
-    fillProviderForm();
-    fireEvent.click(screen.getByRole("button", { name: "确认并启动 API 供应商启动" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "使用模型桶启动" })[0]);
 
     expect(await screen.findByText("归属分析摘要")).toBeInTheDocument();
     expect(screen.getAllByText("恢复 workspace 数").length).toBeGreaterThan(0);
@@ -413,74 +438,45 @@ describe("LoginRepairPage", () => {
     expect(screen.queryByText("待同步行数")).not.toBeInTheDocument();
   });
 
-  it("sends the provider form payload for API launch", async () => {
+  it("sends no provider form payload for API launch", async () => {
     renderPage();
 
     await screen.findByText("chatgpt");
-    fireEvent.click(screen.getAllByRole("button", { name: "填写信息" })[0]);
-    fillProviderForm();
-    fireEvent.click(screen.getByRole("button", { name: "确认并启动 API 供应商启动" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "使用模型桶启动" })[0]);
 
     expect(await screen.findByText("D:/repo/reports/20260522-123456-配置并启动-hybrid")).toBeInTheDocument();
-    expect(prelaunchLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, "api", providerPayload, false, false);
+    expect(prelaunchLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, "api", null, false, false);
   });
 
-  it("keeps chat restore off by default and allows mixed login token input", async () => {
+  it("keeps chat restore off by default for mixed login", async () => {
     renderPage();
 
     await screen.findByText("chatgpt");
-    fireEvent.click(screen.getAllByRole("button", { name: "填写信息" })[1]);
-
-    const restoreSwitch = screen.getByRole("switch", { name: "恢复聊天信息" });
-    expect(restoreSwitch).not.toBeChecked();
-    expect(screen.getByLabelText("Bearer Token")).not.toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText("Provider Key"), { target: { value: providerPayload.key } });
-    fireEvent.change(screen.getByLabelText("Provider Name"), { target: { value: providerPayload.name } });
-    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: providerPayload.base_url } });
-    fireEvent.change(screen.getByLabelText("Bearer Token"), { target: { value: "sk-test-token" } });
-    fireEvent.click(screen.getByRole("button", { name: "确认并启动 混合登录" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "使用模型桶启动" })[1]);
 
     expect(await screen.findByText("D:/repo/reports/20260522-123456-配置并启动-hybrid")).toBeInTheDocument();
     expect(prelaunchLaunchMock).toHaveBeenCalledWith(
       DEFAULT_CODEX_HOME,
       "hybrid",
-      {
-        ...providerPayload,
-        env_key: "",
-        requires_openai_auth: true,
-        experimental_bearer_token: "sk-test-token",
-      },
+      null,
       false,
       false,
     );
   });
 
-  it("forwards chat restore choice when mixed login restore switch is enabled", async () => {
+  it("keeps mixed login provider payload on the model bucket path", async () => {
     renderPage();
 
     await screen.findByText("chatgpt");
-    fireEvent.click(screen.getAllByRole("button", { name: "填写信息" })[1]);
-    fireEvent.click(screen.getByRole("switch", { name: "恢复聊天信息" }));
-
-    fireEvent.change(screen.getByLabelText("Provider Key"), { target: { value: providerPayload.key } });
-    fireEvent.change(screen.getByLabelText("Provider Name"), { target: { value: providerPayload.name } });
-    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: providerPayload.base_url } });
-    fireEvent.change(screen.getByLabelText("Bearer Token"), { target: { value: "sk-test-token" } });
-    fireEvent.click(screen.getByRole("button", { name: "确认并启动 混合登录" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "使用模型桶启动" })[1]);
 
     await waitFor(() => {
       expect(prelaunchLaunchMock).toHaveBeenCalledWith(
         DEFAULT_CODEX_HOME,
         "hybrid",
-        {
-          ...providerPayload,
-          env_key: "",
-          requires_openai_auth: true,
-          experimental_bearer_token: "sk-test-token",
-        },
+        null,
         false,
-        true,
+        false,
       );
     });
   });
@@ -491,7 +487,6 @@ describe("LoginRepairPage", () => {
       chatInfoMoveEnabled: false,
       oneClickHandoffEnabled: false,
       hideOfficialQuotaNoticeEnabled: true,
-      mustInstallPluginsEnabled: false,
     });
 
     renderPage();
@@ -502,12 +497,10 @@ describe("LoginRepairPage", () => {
       expect(prelaunchEnhancedLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME);
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "填写信息" })[0]);
-    fillProviderForm();
-    fireEvent.click(screen.getByRole("button", { name: "确认并启动 API 供应商启动" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "使用模型桶启动" })[0]);
 
     await waitFor(() => {
-      expect(prelaunchLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, "api", providerPayload, true, false);
+      expect(prelaunchLaunchMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, "api", null, true, false);
     });
   });
 
@@ -604,7 +597,7 @@ describe("LoginRepairPage", () => {
 
     expect(screen.queryByRole("button", { name: /配置并启动|修复历史|进入登录与修复/ })).not.toBeInTheDocument();
     expect(screen.queryByText("官方账号启动")).not.toBeInTheDocument();
-    expect(screen.queryByText("API 供应商启动")).not.toBeInTheDocument();
+    expect(screen.queryByText("本地模型桶启动")).not.toBeInTheDocument();
     expect(screen.queryByText("混合登录")).not.toBeInTheDocument();
     expect(screen.queryByText("修复恢复")).not.toBeInTheDocument();
   });

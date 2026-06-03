@@ -22,7 +22,6 @@ from prelaunch_manager import (
     desktop_codex_running_processes,
     config_path_from_codex_home,
     configure_provider_for_launch,
-    ensure_must_install_local_plugins,
     launch_codex_desktop_with_retry,
     load_enhancer_settings,
     read_model_provider,
@@ -425,7 +424,7 @@ def takeover_and_attach(
 
     new_port = int(launch.get("debug_port") or current_port)
     try:
-        wait_before_attach(log_file)
+        wait_before_attach(log_file, new_port)
         sockets, seen = attach_to_codex(codex_home, new_port)
     except Exception as exc:
         cleanup_failed = cleanup_failed_enhanced_launch(current_runtime_pid=os.getpid(), timeout_seconds=4.0)
@@ -452,6 +451,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--codex-home", required=True)
     parser.add_argument("--debug-port", type=int, default=9229)
+    parser.add_argument("--cdp-timeout-seconds", type=float, default=25.0)
     parser.add_argument("--launch-mode", default="official")
     parser.add_argument("--status-file", default="")
     parser.add_argument("--log-file", default="")
@@ -464,7 +464,6 @@ def main() -> int:
 
     codex_home = history_repair.normalize_path(args.codex_home)
     restore_payload = None
-    must_install_plugins_payload = None
     phase = "startup"
     status_ready = False
     try:
@@ -485,14 +484,6 @@ def main() -> int:
                 ensure_ascii=False,
             ),
         )
-        phase = "ensure-must-install-plugins"
-        must_install_plugins_payload = ensure_must_install_local_plugins(codex_home)
-        if must_install_plugins_payload.get("enabled"):
-            append_runtime_log(
-                args.log_file,
-                "must-install plugins "
-                + json.dumps(must_install_plugins_payload, ensure_ascii=False, sort_keys=True),
-            )
         if args.launch_mode == "official":
             phase = "official-provider-override"
             config_path = config_path_from_codex_home(codex_home)
@@ -521,7 +512,8 @@ def main() -> int:
                     f"--remote-debugging-port={args.debug_port}",
                     f"--remote-allow-origins=http://127.0.0.1:{args.debug_port}",
                 ],
-                attempts=3,
+                attempts=1 if args.launch_mode == "existing-session" else 3,
+                cdp_wait_timeout_seconds=args.cdp_timeout_seconds,
             )
         append_runtime_log(args.log_file, f"launch result: {json.dumps(launch, ensure_ascii=False)}")
         if not launch.get("ok"):
@@ -583,7 +575,6 @@ def main() -> int:
                 "debug_port": actual_debug_port,
                 "phase": "ready",
                 "log_file": args.log_file,
-                "must_install_plugins": must_install_plugins_payload,
             },
         )
         status_ready = True

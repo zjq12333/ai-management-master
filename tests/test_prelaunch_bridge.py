@@ -121,86 +121,6 @@ class PrelaunchBridgeTests(unittest.TestCase):
             self.assertTrue(prelaunch_manager.one_click_handoff_enabled(codex_home))
             self.assertTrue(prelaunch_manager.enhancer_enabled(codex_home))
 
-    def test_enhancer_enabled_returns_true_when_must_install_plugins_is_enabled(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            codex_home = Path(tmp)
-            settings_path = codex_home / "codexmate" / "settings.json"
-            settings_path.parent.mkdir(parents=True)
-            settings_path.write_text(
-                json.dumps({"enhancer": {"mustInstallPluginsEnabled": True}}, ensure_ascii=False),
-                encoding="utf-8",
-            )
-
-            self.assertTrue(prelaunch_manager.enhancer_enabled(codex_home))
-
-    def test_ensure_plugin_enabled_adds_enabled_to_existing_plugin_section(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "config.toml"
-            config_path.write_text('[plugins."browser@openai-bundled"]\n', encoding="utf-8")
-
-            changed = prelaunch_manager.ensure_plugin_enabled_in_config(
-                config_path,
-                "browser@openai-bundled",
-            )
-
-            self.assertTrue(changed)
-            self.assertIn(
-                '[plugins."browser@openai-bundled"]\nenabled = true',
-                config_path.read_text(encoding="utf-8"),
-            )
-
-    def test_ensure_must_install_enables_ready_bundled_plugins(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            codex_home = Path(temp_dir)
-            settings_path = codex_home / "codexmate" / "settings.json"
-            settings_path.parent.mkdir(parents=True)
-            settings_path.write_text(
-                json.dumps({"enhancer": {"mustInstallPluginsEnabled": True}}, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            plugin_manifest = (
-                codex_home
-                / "plugins"
-                / "cache"
-                / "openai-bundled"
-                / "browser"
-                / "26.519.41501"
-                / ".codex-plugin"
-                / "plugin.json"
-            )
-            plugin_manifest.parent.mkdir(parents=True)
-            plugin_manifest.write_text("{}", encoding="utf-8")
-            chrome_scripts = (
-                codex_home
-                / "plugins"
-                / "cache"
-                / "openai-bundled"
-                / "chrome"
-                / "26.519.41501"
-                / "scripts"
-            )
-            chrome_scripts.mkdir(parents=True)
-            (chrome_scripts.parent / ".codex-plugin").mkdir()
-            (chrome_scripts.parent / ".codex-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
-            (chrome_scripts / "check-extension-installed.js").write_text("", encoding="utf-8")
-            (chrome_scripts / "check-native-host-manifest.js").write_text("", encoding="utf-8")
-
-            with mock.patch.object(prelaunch_manager.subprocess, "run", return_value=mock.Mock(returncode=0)):
-                result = prelaunch_manager.ensure_must_install_local_plugins(codex_home)
-
-            self.assertTrue(result["enabled"])
-            self.assertTrue(result["changed"])
-            self.assertEqual(result["plugins"], ["browser@openai-bundled", "chrome@openai-bundled"])
-            config_text = (codex_home / "config.toml").read_text(encoding="utf-8")
-            self.assertIn(
-                '[plugins."browser@openai-bundled"]\nenabled = true',
-                config_text,
-            )
-            self.assertIn(
-                '[plugins."chrome@openai-bundled"]\nenabled = true',
-                config_text,
-            )
-
     def test_prepare_report_dir_uses_product_managed_reports_root(self):
         with tempfile.TemporaryDirectory() as temp_dir, mock.patch.dict(
             "os.environ",
@@ -261,6 +181,44 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertEqual(payload["appid"], "OpenAI.Codex_abc!App")
         self.assertEqual(payload["visible_pid"], 1001)
         popen.assert_called_once()
+
+    def test_launch_codex_desktop_treats_appid_pid_as_started_even_when_focus_fails(self):
+        with mock.patch.object(prelaunch_manager.subprocess, "Popen") as popen, mock.patch.object(
+            prelaunch_manager,
+            "focus_codex_window",
+            return_value={"ok": False, "error": "focus denied"},
+        ), mock.patch.object(
+            prelaunch_manager,
+            "desktop_codex_running_processes",
+            return_value=[],
+        ), mock.patch.object(
+            prelaunch_manager,
+            "codex_running_processes",
+            return_value=[],
+        ), mock.patch.object(
+            prelaunch_manager,
+            "find_codex_desktop_appid",
+            return_value="OpenAI.Codex_abc!App",
+        ), mock.patch.object(
+            prelaunch_manager,
+            "prepare_codex_takeover",
+            return_value={"ok": True, "skipped": True},
+        ), mock.patch.object(
+            prelaunch_manager,
+            "wait_for_new_codex_pid",
+            return_value=1001,
+        ), mock.patch.object(
+            prelaunch_manager,
+            "wait_for_visible_codex_window",
+            return_value=None,
+        ):
+            popen.return_value.pid = 1001
+            payload = prelaunch_manager.launch_codex_desktop()
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["method"], "appid")
+        self.assertEqual(payload["pid"], 1001)
+        self.assertIsNone(payload["error"])
 
     def test_launch_codex_desktop_focuses_existing_visible_window(self):
         running = [{"pid": 4242, "image": "Codex.exe", "exe": "C:/Program Files/WindowsApps/OpenAI.Codex/app/Codex.exe"}]
@@ -862,6 +820,49 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertTrue(seen["args"][0].lower().endswith("pythonw.exe"))
 
+    def test_existing_session_enhancer_treats_cdp_not_ready_after_activation_as_partial_success(self):
+        class DummyProcess:
+            pid = 1234
+
+            def poll(self):
+                return None
+
+        def fake_popen(args, **kwargs):
+            status_path = Path(args[args.index("--status-file") + 1])
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "method": "windowsapps_packaged_activation",
+                        "appid": "OpenAI.Codex_abc!App",
+                        "pid": 4321,
+                        "error": "Codex Desktop launched but CDP did not come up on port 9229.",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            return DummyProcess()
+
+        with mock.patch.object(
+            prelaunch_manager,
+            "resolved_python_runtime_executable",
+            return_value="C:/Runtime/python/pythonw.exe",
+        ), mock.patch.object(
+            prelaunch_manager.subprocess,
+            "Popen",
+            side_effect=fake_popen,
+        ):
+            payload = prelaunch_manager.launch_codex_desktop_with_enhancer(
+                Path("C:/Users/test/.codex"),
+                "existing-session",
+            )
+
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["enhancer_attached"])
+        self.assertIsNone(payload["error"])
+        self.assertIn("CDP did not come up", payload["warning"])
+
     def test_resolved_python_runtime_executable_falls_back_when_configured_runtime_lacks_modules(self):
         existing_paths = {
             "c:\\bad\\python.exe",
@@ -884,6 +885,40 @@ class PrelaunchBridgeTests(unittest.TestCase):
             prelaunch_manager.sys,
             "executable",
             "D:/Tools/Python312/python.exe",
+        ):
+            resolved = prelaunch_manager.resolved_python_runtime_executable()
+
+        self.assertEqual(resolved, "D:\\Tools\\Python312\\pythonw.exe")
+
+    def test_resolved_python_runtime_executable_in_frozen_bridge_uses_real_python(self):
+        existing_paths = {
+            "d:\\tools\\python312\\python.exe",
+            "d:\\tools\\python312\\pythonw.exe",
+            "d:\\app\\prelaunch_bridge.exe",
+        }
+
+        with mock.patch.dict("os.environ", {}, clear=True), mock.patch.object(
+            prelaunch_manager.Path,
+            "exists",
+            autospec=True,
+            side_effect=lambda path_obj: str(path_obj).replace("/", "\\").lower() in existing_paths,
+        ), mock.patch.object(
+            prelaunch_manager.shutil,
+            "which",
+            return_value=None,
+        ), mock.patch.object(
+            prelaunch_manager,
+            "python_runtime_supports_enhancer_modules",
+            side_effect=lambda path: str(path).replace("/", "\\").lower() == "d:\\tools\\python312\\python.exe",
+        ), mock.patch.object(
+            prelaunch_manager.sys,
+            "executable",
+            "D:/app/prelaunch_bridge.exe",
+        ), mock.patch.object(
+            prelaunch_manager.sys,
+            "frozen",
+            True,
+            create=True,
         ):
             resolved = prelaunch_manager.resolved_python_runtime_executable()
 
@@ -988,7 +1023,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
     def test_official_launch_skips_history_restore_and_returns_structured_payload(self):
         calls = []
         compatibility_payload = {"ok": True, "skipped": True, "reason": "compatibility_check_only", "status": {"rows_needing_reconcile": 0}}
-        launch_payload = {"ok": True, "method": "enhancer_runtime", "pid": 4321}
+        launch_payload = {"ok": True, "method": "appid", "pid": 4321}
 
         with mock.patch.object(
             prelaunch_bridge,
@@ -996,9 +1031,12 @@ class PrelaunchBridgeTests(unittest.TestCase):
             side_effect=lambda *args, **kwargs: calls.append("compatibility") or compatibility_payload,
         ), mock.patch.object(
             prelaunch_bridge,
-            "launch_codex_desktop_with_enhancer",
-            side_effect=lambda codex_home, launch_mode: calls.append("launch") or launch_payload,
+            "launch_codex_desktop",
+            side_effect=lambda: calls.append("launch") or launch_payload,
         ), mock.patch.object(
+            prelaunch_bridge,
+            "launch_codex_desktop_with_enhancer",
+        ) as enhanced_launch, mock.patch.object(
             prelaunch_bridge,
             "current_provider_config_payload",
             side_effect=lambda *args, **kwargs: calls.append("provider")
@@ -1021,6 +1059,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
             )
 
         self.assertEqual(calls, ["provider", "compatibility", "launch"])
+        enhanced_launch.assert_not_called()
         self.assertTrue(payload["ok"])
         self.assertEqual(
             payload["provider_config"],
@@ -1041,15 +1080,15 @@ class PrelaunchBridgeTests(unittest.TestCase):
             {
                 "ok": True,
                 "skipped": True,
-                "reason": "official_enhanced_launch_keeps_original_chat_state",
+                "reason": "official_launch_keeps_original_chat_state",
             },
         )
         self.assertEqual(payload["launch"], launch_payload)
 
-    def test_launch_flow_uses_enhancer_runtime_when_any_enhancer_feature_is_enabled(self):
+    def test_launch_flow_keeps_normal_launcher_even_when_enhancer_feature_is_enabled(self):
         calls = []
         compatibility_payload = {"ok": True, "skipped": True, "reason": "compatibility_check_only", "status": {"rows_needing_reconcile": 0}}
-        launch_payload = {"ok": True, "method": "enhancer_runtime", "pid": 4321}
+        launch_payload = {"ok": True, "method": "appid", "pid": 4321}
 
         with mock.patch.object(
             prelaunch_bridge,
@@ -1070,16 +1109,12 @@ class PrelaunchBridgeTests(unittest.TestCase):
             },
         ), mock.patch.object(
             prelaunch_bridge,
-            "enhancer_enabled",
-            side_effect=lambda codex_home: calls.append(("enabled", codex_home)) or True,
-        ), mock.patch.object(
+            "launch_codex_desktop",
+            side_effect=lambda: calls.append(("normal",)) or launch_payload,
+        ) as normal_launch, mock.patch.object(
             prelaunch_bridge,
             "launch_codex_desktop_with_enhancer",
-            side_effect=lambda codex_home, launch_mode: calls.append(("enhancer", codex_home, launch_mode)) or launch_payload,
-        ) as enhanced_launch, mock.patch.object(
-            prelaunch_bridge,
-            "launch_codex_desktop",
-        ) as normal_launch:
+        ) as enhanced_launch:
             payload = prelaunch_bridge.handle_launch(
                 codex_home="C:/Users/test/.codex",
                 mode="official",
@@ -1087,12 +1122,11 @@ class PrelaunchBridgeTests(unittest.TestCase):
                 projectless_mode="none",
             )
 
-        normal_launch.assert_not_called()
-        enhanced_launch.assert_called_once()
+        normal_launch.assert_called_once_with()
+        enhanced_launch.assert_not_called()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["launch"], launch_payload)
-        self.assertEqual(calls[0][0], "enhancer")
-        self.assertEqual(calls[0][2], "official")
+        self.assertEqual(calls, [("normal",)])
 
     def test_all_login_modes_repair_original_place_before_provider_compatibility_check(self):
         provider = {
@@ -1147,13 +1181,12 @@ class PrelaunchBridgeTests(unittest.TestCase):
                     or {"ok": True, "summary": {"threads_selected": 1}},
                 ), mock.patch.object(
                     prelaunch_bridge,
-                    "launch_codex_desktop_with_enhancer" if mode in ("official", "hybrid") else "launch_codex_desktop",
-                    side_effect=(
-                        (lambda codex_home, launch_mode: calls.append("launch") or {"ok": True, "method": "enhancer_runtime"})
-                        if mode in ("official", "hybrid")
-                        else (lambda: calls.append("launch") or {"ok": True, "method": "appid"})
-                    ),
-                ):
+                    "launch_codex_desktop",
+                    side_effect=lambda: calls.append("launch") or {"ok": True, "method": "appid"},
+                ), mock.patch.object(
+                    prelaunch_bridge,
+                    "launch_codex_desktop_with_enhancer",
+                ) as enhanced_launch:
                     payload = prelaunch_bridge.handle_launch(
                         codex_home="C:/Users/test/.codex",
                         mode=mode,
@@ -1165,6 +1198,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
                 self.assertTrue(payload["ok"])
                 expected_calls = ["provider", "compatibility", "launch"] if mode == "official" else ["repair", "configure", "compatibility", "launch"]
                 self.assertEqual(calls, expected_calls)
+                enhanced_launch.assert_not_called()
 
     def test_hide_official_quota_notice_prepares_marker_and_continues_for_official_launch(self):
         notice_payload = {
@@ -1203,9 +1237,12 @@ class PrelaunchBridgeTests(unittest.TestCase):
             "run_history_repair",
         ) as run_repair, mock.patch.object(
             prelaunch_bridge,
+            "launch_codex_desktop",
+            return_value={"ok": True, "method": "appid"},
+        ) as launch_codex, mock.patch.object(
+            prelaunch_bridge,
             "launch_codex_desktop_with_enhancer",
-            return_value={"ok": True, "method": "enhancer_runtime"},
-        ) as launch_codex:
+        ) as enhanced_launch:
             payload = prelaunch_bridge.handle_launch(
                 codex_home="C:/Users/test/.codex",
                 mode="official",
@@ -1219,10 +1256,11 @@ class PrelaunchBridgeTests(unittest.TestCase):
         current_provider.assert_called_once()
         run_compatibility.assert_called_once()
         run_repair.assert_not_called()
-        launch_codex.assert_called_once()
+        launch_codex.assert_called_once_with()
+        enhanced_launch.assert_not_called()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["notice_suppression"], notice_payload)
-        self.assertEqual(payload["launch"]["method"], "enhancer_runtime")
+        self.assertEqual(payload["launch"]["method"], "appid")
 
     def test_launch_preserves_codex_when_takeover_would_have_failed(self):
         with mock.patch.object(
@@ -1238,8 +1276,8 @@ class PrelaunchBridgeTests(unittest.TestCase):
             },
         ), mock.patch.object(
             prelaunch_bridge,
-            "launch_codex_desktop_with_enhancer",
-            return_value={"ok": True, "method": "enhancer_runtime", "pid": 4321},
+            "launch_codex_desktop",
+            return_value={"ok": True, "method": "appid", "pid": 4321},
         ):
             payload = prelaunch_bridge.handle_launch(
                 codex_home="C:/Users/test/.codex",
@@ -1346,7 +1384,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertEqual(payload["provider_config"]["target_model_provider"], "lac")
         self.assertEqual(payload["launch"]["method"], "appid")
 
-    def test_enhanced_reuse_keeps_current_provider_config(self):
+    def test_hybrid_launch_reuses_existing_provider_config_without_mutating_it(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             codex_home = Path(temp_dir)
             (codex_home / "config.toml").write_text(
@@ -1376,22 +1414,26 @@ class PrelaunchBridgeTests(unittest.TestCase):
                 return_value={"ok": True, "summary": {"threads_selected": 1}},
             ) as run_repair, mock.patch.object(
                 prelaunch_bridge,
+                "launch_codex_desktop",
+                return_value={"ok": True, "method": "appid"},
+            ) as launch_codex, mock.patch.object(
+                prelaunch_bridge,
                 "launch_codex_desktop_with_enhancer",
-                return_value={"ok": True, "method": "enhancer_runtime"},
-            ):
+            ) as enhanced_launch:
                 payload = prelaunch_bridge.handle_launch(str(codex_home), "hybrid", None, "none")
 
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["provider_config"]["source"], "existing_config")
-        self.assertEqual(payload["provider_config"]["target_model_provider"], "openai")
-        self.assertFalse(payload["provider_config"]["mutated"])
-        self.assertEqual(payload["repair"], {"ok": True, "skipped": True, "reason": "enhanced_reuse_keeps_existing_chat_state"})
-        self.assertEqual(payload["provider_compatibility"], {"ok": True, "skipped": True, "reason": "enhanced_reuse_skips_provider_compatibility_check", "status": {"rows_needing_reconcile": 0}})
-        self.assertEqual(payload["launch"]["method"], "enhancer_runtime")
+        self.assertEqual(payload["provider_config"]["target_model_provider"], "lac")
+        self.assertEqual(payload["provider_config"]["verified_model_provider"], "lac")
+        self.assertEqual(payload["repair"], {"ok": True, "skipped": True, "reason": "launch_history_restore_disabled"})
+        self.assertEqual(payload["provider_compatibility"], {"ok": True, "skipped": True, "reason": "compatibility_check_only", "status": {}})
+        self.assertEqual(payload["launch"]["method"], "appid")
         run_repair.assert_not_called()
-        run_compatibility.assert_not_called()
+        run_compatibility.assert_called_once()
+        launch_codex.assert_called_once_with()
+        enhanced_launch.assert_not_called()
 
-    def test_enhanced_reuse_launch_skips_codex_takeover(self):
+    def test_hybrid_launch_skips_codex_takeover(self):
         with tempfile.TemporaryDirectory() as tmp:
             codex_home = Path(tmp) / ".codex"
             codex_home.mkdir()
@@ -1416,19 +1458,23 @@ class PrelaunchBridgeTests(unittest.TestCase):
             with mock.patch.object(
                 prelaunch_bridge,
                 "prepare_codex_takeover",
-                side_effect=AssertionError("enhanced reuse launch must not stop existing Codex"),
+                side_effect=AssertionError("launch must not stop existing Codex"),
             ), mock.patch.object(
                 prelaunch_bridge,
-                "launch_codex_desktop_with_enhancer",
-                return_value={"ok": True, "method": "enhancer_runtime"},
+                "run_threadripper_compatibility_check",
+                return_value={"ok": True, "skipped": True, "reason": "compatibility_check_only", "status": {}},
+            ), mock.patch.object(
+                prelaunch_bridge,
+                "launch_codex_desktop",
+                return_value={"ok": True, "method": "appid"},
             ):
                 payload = prelaunch_bridge.handle_launch(str(codex_home), "hybrid", None, "none")
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["takeover"]["reason"], "launch_preserves_existing_codex")
-        self.assertEqual(payload["launch"]["method"], "enhancer_runtime")
+        self.assertEqual(payload["launch"]["method"], "appid")
 
-    def test_enhanced_reuse_launch_does_not_require_hybrid_provider_token(self):
+    def test_hybrid_launch_requires_provider_token(self):
         with tempfile.TemporaryDirectory() as tmp:
             codex_home = Path(tmp) / ".codex"
             codex_home.mkdir()
@@ -1450,24 +1496,17 @@ class PrelaunchBridgeTests(unittest.TestCase):
 
             with mock.patch.object(
                 prelaunch_bridge,
-                "load_provider_profile_from_config",
-                side_effect=AssertionError("enhanced reuse must not require a hybrid provider"),
+                "run_threadripper_compatibility_check",
+                return_value={"ok": True, "skipped": True, "reason": "compatibility_check_only", "status": {}},
             ), mock.patch.object(
                 prelaunch_bridge,
-                "configure_provider_for_launch",
-                side_effect=AssertionError("enhanced reuse must not rewrite provider config"),
-            ), mock.patch.object(
-                prelaunch_bridge,
-                "launch_codex_desktop_with_enhancer",
-                return_value={"ok": True, "method": "enhancer_runtime"},
+                "launch_codex_desktop",
+                return_value={"ok": True, "method": "appid"},
             ):
                 payload = prelaunch_bridge.handle_launch(str(codex_home), "hybrid", None, "none")
 
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["provider_config"]["source"], "existing_config")
-        self.assertEqual(payload["provider_config"]["target_model_provider"], "codexzh")
-        self.assertFalse(payload["provider_config"]["mutated"])
-        self.assertEqual(payload["launch"]["method"], "enhancer_runtime")
+        self.assertFalse(payload["ok"])
+        self.assertIn("No hybrid-capable provider found", payload["error"])
 
     def test_existing_session_enhanced_launch_does_not_touch_provider_or_history(self):
         with tempfile.TemporaryDirectory() as tmp:

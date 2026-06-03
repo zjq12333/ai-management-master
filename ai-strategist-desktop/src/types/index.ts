@@ -3,8 +3,6 @@ export type ApiProxyMode = "direct" | "manual";
 export type ApiReachabilityStatus = "unknown" | "reachable" | "unreachable";
 export type AutoSwitchRuntimeState = "running" | "stopped" | "notInstalled" | "unknown";
 export type McpTransport = "stdio" | "http" | "sse" | "unknown";
-export type CustomInstructionProtectionState = "ready" | "unmanaged" | "protected";
-export type CustomInstructionHistoryAction = "apply" | "clear" | "rollback";
 export type VoiceTemplateKind = "dictation" | "task" | "review" | "translation" | "summary" | "custom";
 export type VoiceVocabularyKind = "hotword" | "mapping";
 export type VoiceSpeechModel = "appleSpeech" | "aliyunFunAsr" | "openai";
@@ -77,40 +75,6 @@ export interface CoreSnapshotPayload {
   status: AppStatusPayload;
 }
 
-export interface CustomInstructionCurrentState {
-  globalPath: string;
-  fileExists: boolean;
-  managedBlockPresent: boolean;
-  protectionState: CustomInstructionProtectionState;
-  issueMessage: string | null;
-  managedContent: string;
-  lastAppliedAt: number | null;
-  lastTemplateCode: string | null;
-  lastTemplateTitle: string | null;
-}
-
-export interface CustomInstructionHistoryEntry {
-  id: string;
-  createdAt: number;
-  action: CustomInstructionHistoryAction;
-  source: string;
-  templateCode: string | null;
-  templateTitle: string | null;
-}
-
-export interface CustomInstructionStatePayload {
-  current: CustomInstructionCurrentState;
-  history: CustomInstructionHistoryEntry[];
-}
-
-export interface CustomInstructionPreviewPayload {
-  globalPath: string;
-  protectionState: CustomInstructionProtectionState;
-  issueMessage: string | null;
-  currentManagedContent: string;
-  nextManagedContent: string;
-  resultingContent: string;
-}
 
 export interface VoicePromptTemplate {
   id: string;

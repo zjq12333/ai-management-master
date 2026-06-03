@@ -8,9 +8,9 @@
     "overview": "仪表盘",
     "import": "导入",
     "aiManagement": "AI管理中心",
+    "modelManagement": "模型管理",
     "mcp": "MCP 管理",
     "skills": "Skills 管理",
-    "customInstructions": "策略模板",
     "maintenance": "维护工具",
     "settings": "系统设置",
     "notifications": "通知",
@@ -20,7 +20,8 @@
     "sidebarDarkTheme": "深色主题",
     "sidebarSystemTheme": "跟随系统",
     "sidebarLanguageZh": "简体中文",
-    "sidebarLanguageEn": "English"
+    "sidebarLanguageEn": "English",
+    "plugins": "插件管理"
   },
   "overview": {
     "title": "仪表盘",
@@ -112,67 +113,8 @@
   },
   "aiManagement": {
     "title": "AI管理中心",
-    "description": "集中管理策略模板、MCP 服务和 Skills 能力。先选择设置项，再进入具体内容。第三层内容会在下方显示。",
-    "strategyTemplates": "策略模板"
-  },
-  "customInstructions": {
-    "title": "策略模板",
-    "description": "用策略模板管理 Codex 的全局工作偏好，只作用于 ~/.codex/AGENTS.md，不影响项目级 AGENTS 规则。",
-    "templatesTitle": "模板中心",
-    "templatesDescription": "内置模板可直接应用。",
-    "currentTitle": "当前生效指令",
-    "currentDescription": "这里只展示 AI Strategist 受控区块的内容，不会覆盖你手写的其他全局规则。",
-    "editorTitle": "本地编辑器",
-    "editorDescription": "可基于模板修改后再应用，最终只更新全局 AGENTS 的 AI Strategist 管理块。",
-    "editorPlaceholder": "在这里编辑要写入全局策略模板受控区块的内容",
-    "historyTitle": "应用历史",
-    "historyDescription": "保留最近本地应用记录，出问题时可以快速回滚。",
-    "globalScopeHint": "只管理全局 ~/.codex/AGENTS.md 的 AI Strategist 受控区块",
-    "stateManaged": "AI Strategist 管理中",
-    "stateUnmanaged": "尚未建立受控区块",
-    "stateProtected": "保护模式",
-    "currentManagedBlock": "当前受控区块",
-    "nextManagedBlock": "应用后内容",
-    "noManagedContent": "当前还没有 AI Strategist 管理块。",
-    "clearedManagedContent": "本次会清空 AI Strategist 管理块。",
-    "lastApplied": "最近应用",
-    "lastTemplate": "最近模板",
-    "openGlobalFile": "查看原始全局文件",
-    "restoreCurrent": "恢复当前生效内容",
-    "clearManagedBlock": "清空 AI Strategist 管理块",
-    "clearConfirmTitle": "清空 AI Strategist 管理块？",
-    "clearConfirmDescription": "这只会移除 ~/.codex/AGENTS.md 里的 AI Strategist 受控区块，不会删除你原有的其他全局规则。",
-    "templatesLoadFailed": "模板加载失败，已回退到内置模板",
-    "loadFailed": "策略模板数据刷新失败",
-    "loadFailedDesc": "请稍后重试，或检查网络后再刷新页面。",
-    "previewAction": "预览应用",
-    "previewAndApply": "预览并应用",
-    "previewTitle": "预览应用结果",
-    "previewDescription": "这次只会更新全局 ~/.codex/AGENTS.md 里的 AI Strategist 受控区块，不会修改项目代码或项目级 AGENTS。",
-    "previewFailed": "生成预览失败",
-    "loadToEditor": "载入编辑器",
-    "loadedToEditor": "已载入",
-    "resetEditor": "重置为当前生效内容",
-    "manualContent": "手工内容",
-    "noHistory": "还没有本地应用历史。",
-    "rollbackAction": "回滚到这里",
-    "rollingBack": "回滚中...",
-    "historyActionApply": "应用",
-    "historyActionClear": "清空",
-    "historyActionRollback": "回滚",
-    "applying": "应用中...",
-    "confirmApply": "确认应用",
-    "appliedCount": "已应用 {{count}} 次",
-    "applySuccess": "全局策略模板已更新",
-    "applySuccessDesc": "AI Strategist 受控区块已写入 ~/.codex/AGENTS.md。",
-    "applyFailed": "应用策略模板失败",
-    "clearSuccess": "AI Strategist 管理块已清空",
-    "clearSuccessDesc": "全局 AGENTS 中的 AI Strategist 受控区块已移除。",
-    "clearFailed": "清空策略模板失败",
-    "clearing": "清空中...",
-    "rollbackSuccess": "已回滚到所选历史版本",
-    "rollbackSuccessDesc": "已用所选历史版本覆盖当前 AI Strategist 受控区块。",
-    "rollbackFailed": "回滚策略模板失败"
+    "description": "集中管理插件、MCP 服务和 Skills 能力。先选择设置项，再进入具体内容。第三层内容会在下方显示。",
+    "plugins": "插件管理"
   },
   "maintenance": {
     "title": "维护工具",
@@ -317,5 +259,71 @@
     "openApplications": "打开应用程序文件夹",
     "retry": "重试",
     "skipThisTime": "暂时跳过，稍后再试"
+  },
+  "plugins": {
+    "title": "插件管理",
+    "description": "扫描本机 Codex 插件缓存和启用状态，后续将在这里接入同步与安装。",
+    "actions": {
+      "sync": "同步插件库",
+      "browse": "浏览插件",
+      "refresh": "刷新扫描",
+      "scanning": "扫描中",
+      "syncing": "同步中",
+      "install": "安装插件",
+      "openInstallPage": "打开官方安装页",
+      "notDirectInstallable": "暂不可直接安装"
+    },
+    "stats": {
+      "total": "插件数量",
+      "enabled": "已启用",
+      "marketplaces": "插件源",
+      "cache": "缓存目录"
+    },
+    "paths": {
+      "title": "Codex 插件路径",
+      "codexHome": "Codex Home",
+      "config": "配置文件",
+      "cache": "缓存目录"
+    },
+    "installed": {
+      "title": "已发现插件",
+      "empty": "暂未发现插件。"
+    },
+    "sources": {
+      "openai": "OpenAI 插件库",
+      "local": "本地插件缓存",
+      "custom": "自定义插件源"
+    },
+    "status": {
+      "ready": "正常",
+      "missing": "缺失",
+      "enabled": "已启用",
+      "disabled": "未启用",
+      "configOnly": "仅配置"
+    },
+    "downloaded": {
+      "title": "已下载 / 已配置",
+      "subtitle": "本地已发现的插件"
+    },
+    "market": {
+      "title": "原生插件市场",
+      "subtitle": "来自 Codex 插件缓存和后续同步的 marketplace",
+      "empty": "还没有同步原生插件市场。",
+      "cached": "个缓存插件",
+      "available": "个可安装插件",
+      "note": "这里当前显示的是本地缓存和同步源，不是 Codex 在线市场的完整列表。Codex 内部很多插件来自在线 featured/search 接口，下一步会接入完整市场发现。",
+      "unknownDescription": "暂无描述",
+      "searchPlaceholder": "搜索插件、描述或 ID",
+      "allCategories": "全部分类",
+      "showing": "显示 {{shown}} / {{total}} 个匹配插件。安装按钮下一步接入本地安装器。"
+    },
+    "views": {
+      "installed": "已安装",
+      "marketplace": "插件市场"
+    },
+    "install": {
+      "installed": "已安装 {{name}} v{{version}}，已写入 Codex 插件缓存并启用。",
+      "reinstalled": "{{name}} v{{version}} 已重新安装并启用。"
+    }
   }
 }

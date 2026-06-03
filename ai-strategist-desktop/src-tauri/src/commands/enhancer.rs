@@ -40,13 +40,3 @@ pub fn set_hide_official_quota_notice_enabled(
     repo.set_hide_official_quota_notice_enabled(enabled)
         .map_err(|e| e.to_string())
 }
-
-#[tauri::command]
-pub fn set_must_install_plugins_enabled(
-    repo: State<'_, Mutex<Repository>>,
-    enabled: bool,
-) -> Result<EnhancerSettingsPayload, String> {
-    let repo = repo.lock().map_err(|e| e.to_string())?;
-    repo.set_must_install_plugins_enabled(enabled)
-        .map_err(|e| e.to_string())
-}

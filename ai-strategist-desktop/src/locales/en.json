@@ -8,9 +8,9 @@
     "overview": "Dashboard",
     "import": "Import",
     "aiManagement": "AI Management",
+    "modelManagement": "Model Management",
     "mcp": "MCP Servers",
     "skills": "Skills",
-    "customInstructions": "Strategy Templates",
     "maintenance": "Maintenance",
     "settings": "Settings",
     "notifications": "Notifications",
@@ -20,7 +20,8 @@
     "sidebarDarkTheme": "Dark theme",
     "sidebarSystemTheme": "System",
     "sidebarLanguageZh": "简体中文",
-    "sidebarLanguageEn": "English"
+    "sidebarLanguageEn": "English",
+    "plugins": "Plugins"
   },
   "overview": {
     "title": "Dashboard",
@@ -112,67 +113,8 @@
   },
   "aiManagement": {
     "title": "AI Management",
-    "description": "Manage strategy templates, MCP servers, and Skills from one center. Choose a setting first, then edit its detailed content below.",
-    "strategyTemplates": "Strategy Templates"
-  },
-  "customInstructions": {
-    "title": "Strategy Templates",
-    "description": "Manage Codex global working preferences through strategy templates in ~/.codex/AGENTS.md without touching project-level AGENTS rules.",
-    "templatesTitle": "Template Center",
-    "templatesDescription": "Built-in templates are available now and admin-managed templates can be attached later.",
-    "currentTitle": "Current Effective Instructions",
-    "currentDescription": "Only the AI Strategist managed block is shown here. Other handwritten global rules are preserved.",
-    "editorTitle": "Local Editor",
-    "editorDescription": "Edit on top of a template, then apply only to the AI Strategist managed block in the global AGENTS file.",
-    "editorPlaceholder": "Edit the content that will be written into the managed global strategy-template block",
-    "historyTitle": "Apply History",
-    "historyDescription": "Recent local apply records are kept here so you can roll back quickly.",
-    "globalScopeHint": "Only manages the AI Strategist block inside global ~/.codex/AGENTS.md",
-    "stateManaged": "Managed by AI Strategist",
-    "stateUnmanaged": "No managed block yet",
-    "stateProtected": "Protected mode",
-    "currentManagedBlock": "Current managed block",
-    "nextManagedBlock": "Next content",
-    "noManagedContent": "There is no AI Strategist managed block yet.",
-    "clearedManagedContent": "This action will clear the AI Strategist managed block.",
-    "lastApplied": "Last applied",
-    "lastTemplate": "Last template",
-    "openGlobalFile": "Open raw global file",
-    "restoreCurrent": "Restore current effective content",
-    "clearManagedBlock": "Clear AI Strategist block",
-    "clearConfirmTitle": "Clear AI Strategist managed block?",
-    "clearConfirmDescription": "This only removes the AI Strategist managed block from ~/.codex/AGENTS.md and preserves any other global rules you wrote yourself.",
-    "templatesLoadFailed": "Failed to load remote templates. Falling back to built-in templates.",
-    "loadFailed": "Failed to refresh strategy-template data",
-    "loadFailedDesc": "Try again later, or check your network and refresh the page.",
-    "previewAction": "Preview apply",
-    "previewAndApply": "Preview and apply",
-    "previewTitle": "Preview apply result",
-    "previewDescription": "This only updates the AI Strategist managed block inside ~/.codex/AGENTS.md. It does not touch project code or project-level AGENTS files.",
-    "previewFailed": "Failed to build preview",
-    "loadToEditor": "Load to editor",
-    "loadedToEditor": "Loaded",
-    "resetEditor": "Reset to current effective content",
-    "manualContent": "Manual content",
-    "noHistory": "No local apply history yet.",
-    "rollbackAction": "Rollback to here",
-    "rollingBack": "Rolling back...",
-    "historyActionApply": "Apply",
-    "historyActionClear": "Clear",
-    "historyActionRollback": "Rollback",
-    "applying": "Applying...",
-    "confirmApply": "Confirm apply",
-    "appliedCount": "Applied {{count}} times",
-    "applySuccess": "Global strategy templates updated",
-    "applySuccessDesc": "The AI Strategist managed block was written to ~/.codex/AGENTS.md.",
-    "applyFailed": "Failed to apply strategy templates",
-    "clearSuccess": "AI Strategist managed block cleared",
-    "clearSuccessDesc": "The AI Strategist managed block was removed from the global AGENTS file.",
-    "clearFailed": "Failed to clear strategy templates",
-    "clearing": "Clearing...",
-    "rollbackSuccess": "Rolled back to the selected history",
-    "rollbackSuccessDesc": "The selected history version replaced the current AI Strategist managed block.",
-    "rollbackFailed": "Failed to roll back strategy templates"
+    "description": "Manage plugins, MCP servers, and Skills from one place. Choose a module first, then work in the detail area below.",
+    "plugins": "Plugins"
   },
   "maintenance": {
     "title": "Maintenance",
@@ -317,5 +259,71 @@
     "openApplications": "Open Applications Folder",
     "retry": "Retry",
     "skipThisTime": "Skip for now, try later"
+  },
+  "plugins": {
+    "title": "Plugin Management",
+    "description": "Scan local Codex plugin cache and enabled state. Sync and install actions will be added here next.",
+    "actions": {
+      "sync": "Sync plugins",
+      "browse": "Browse plugins",
+      "refresh": "Refresh scan",
+      "scanning": "Scanning",
+      "syncing": "Syncing",
+      "install": "Install plugin",
+      "openInstallPage": "Open official install page",
+      "notDirectInstallable": "Not directly installable yet"
+    },
+    "stats": {
+      "total": "Plugins",
+      "enabled": "Enabled",
+      "marketplaces": "Sources",
+      "cache": "Cache"
+    },
+    "paths": {
+      "title": "Codex plugin paths",
+      "codexHome": "Codex Home",
+      "config": "Config",
+      "cache": "Cache"
+    },
+    "installed": {
+      "title": "Discovered plugins",
+      "empty": "No plugins found."
+    },
+    "sources": {
+      "openai": "OpenAI plugin library",
+      "local": "Local plugin cache",
+      "custom": "Custom plugin source"
+    },
+    "status": {
+      "ready": "Ready",
+      "missing": "Missing",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "configOnly": "config only"
+    },
+    "downloaded": {
+      "title": "Downloaded / configured",
+      "subtitle": "Plugins found locally"
+    },
+    "market": {
+      "title": "Native plugin marketplace",
+      "subtitle": "Marketplace sources from Codex cache and future sync",
+      "empty": "Native plugin marketplace has not been synced yet.",
+      "cached": "cached plugins",
+      "available": "available plugins",
+      "note": "This currently shows local cache and synced sources, not the full Codex online marketplace. Many Codex plugins come from online featured/search endpoints; full marketplace discovery is next.",
+      "unknownDescription": "No description",
+      "searchPlaceholder": "Search plugins, descriptions, or IDs",
+      "allCategories": "All categories",
+      "showing": "Showing {{shown}} / {{total}} matching plugins. Install buttons will be connected next."
+    },
+    "views": {
+      "installed": "Installed",
+      "marketplace": "Marketplace"
+    },
+    "install": {
+      "installed": "Installed {{name}} v{{version}} into the Codex plugin cache and enabled it.",
+      "reinstalled": "Reinstalled and enabled {{name}} v{{version}}."
+    }
   }
 }

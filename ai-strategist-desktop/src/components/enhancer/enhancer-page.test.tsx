@@ -12,14 +12,12 @@ const {
   setChatInfoMoveEnabledMock,
   setOneClickHandoffEnabledMock,
   setHideOfficialQuotaNoticeEnabledMock,
-  setMustInstallPluginsEnabledMock,
   switchProps,
 } = vi.hoisted(() => ({
   getEnhancerSettingsMock: vi.fn(),
   setChatInfoMoveEnabledMock: vi.fn(),
   setOneClickHandoffEnabledMock: vi.fn(),
   setHideOfficialQuotaNoticeEnabledMock: vi.fn(),
-  setMustInstallPluginsEnabledMock: vi.fn(),
   switchProps: [] as Array<{
     checked: boolean;
     disabled?: boolean;
@@ -34,7 +32,6 @@ vi.mock("@/lib/api", () => ({
     setChatInfoMoveEnabled: setChatInfoMoveEnabledMock,
     setOneClickHandoffEnabled: setOneClickHandoffEnabledMock,
     setHideOfficialQuotaNoticeEnabled: setHideOfficialQuotaNoticeEnabledMock,
-    setMustInstallPluginsEnabled: setMustInstallPluginsEnabledMock,
   },
 }));
 
@@ -65,35 +62,24 @@ beforeEach(() => {
     chatInfoMoveEnabled: false,
     oneClickHandoffEnabled: false,
     hideOfficialQuotaNoticeEnabled: false,
-    mustInstallPluginsEnabled: false,
   });
   setChatInfoMoveEnabledMock.mockReset();
   setChatInfoMoveEnabledMock.mockResolvedValue({
     chatInfoMoveEnabled: true,
     oneClickHandoffEnabled: false,
     hideOfficialQuotaNoticeEnabled: false,
-    mustInstallPluginsEnabled: false,
   });
   setOneClickHandoffEnabledMock.mockReset();
   setOneClickHandoffEnabledMock.mockResolvedValue({
     chatInfoMoveEnabled: false,
     oneClickHandoffEnabled: true,
     hideOfficialQuotaNoticeEnabled: false,
-    mustInstallPluginsEnabled: false,
   });
   setHideOfficialQuotaNoticeEnabledMock.mockReset();
   setHideOfficialQuotaNoticeEnabledMock.mockResolvedValue({
     chatInfoMoveEnabled: false,
     oneClickHandoffEnabled: false,
     hideOfficialQuotaNoticeEnabled: true,
-    mustInstallPluginsEnabled: false,
-  });
-  setMustInstallPluginsEnabledMock.mockReset();
-  setMustInstallPluginsEnabledMock.mockResolvedValue({
-    chatInfoMoveEnabled: false,
-    oneClickHandoffEnabled: false,
-    hideOfficialQuotaNoticeEnabled: false,
-    mustInstallPluginsEnabled: true,
   });
 });
 
@@ -121,8 +107,6 @@ describe("EnhancerPage", () => {
     expect(screen.getByRole("switch", { name: "一键移交任务" })).toBeInTheDocument();
     expect(screen.getByText("隐藏 Codex 官方额度提醒")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "隐藏 Codex 官方额度提醒" })).toBeInTheDocument();
-    expect(screen.getByText("必须装")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "必须装" })).toBeInTheDocument();
     expect(getEnhancerSettingsMock).toHaveBeenCalledTimes(1);
   });
 
@@ -168,21 +152,6 @@ describe("EnhancerPage", () => {
 
     await waitFor(() => {
       expect(setHideOfficialQuotaNoticeEnabledMock).toHaveBeenCalledWith(true);
-    });
-  });
-
-  it("saves the must-install plugin toggle state", async () => {
-    renderPage();
-
-    await screen.findByText("必须装");
-    const toggle = switchProps.find((item) => item["aria-label"] === "必须装");
-    expect(toggle?.onCheckedChange).toBeTypeOf("function");
-    act(() => {
-      toggle?.onCheckedChange?.(true);
-    });
-
-    await waitFor(() => {
-      expect(setMustInstallPluginsEnabledMock).toHaveBeenCalledWith(true);
     });
   });
 

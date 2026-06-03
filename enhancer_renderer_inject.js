@@ -9,15 +9,12 @@
   const moveOverlayClass = "ai-strategist-move-overlay";
   const movePanelClass = "ai-strategist-move-panel";
   const toastClass = "ai-strategist-toast";
-  const pluginNavButtonSelector = 'nav[role="navigation"] button.h-token-nav-row.w-full';
-  const pluginSvgPathSelector = 'svg path[d^="M7.94562 14.0277"]';
   const projectionStorageKey = "__ai_strategist_project_move_projection_v1__";
   const projectionTtlMs = 60_000;
   const refreshDelaysMs = [200, 900, 2200];
   const defaultSettings = {
     chatInfoMoveEnabled: false,
     oneClickHandoffEnabled: false,
-    mustInstallPluginsEnabled: false,
   };
 
   function enhancerSettings() {
@@ -51,166 +48,8 @@
     return needles.some((needle) => text.includes(needle.toLowerCase()));
   }
 
-  function reactFiberFrom(element) {
-    const fiberKey = Object.keys(element).find((key) => key.startsWith("__reactFiber"));
-    return fiberKey ? element[fiberKey] : null;
-  }
-
-  function authContextValueFrom(element) {
-    for (let fiber = reactFiberFrom(element); fiber; fiber = fiber.return) {
-      for (const value of [fiber.memoizedProps?.value, fiber.pendingProps?.value]) {
-        if (value && typeof value === "object" && typeof value.setAuthMethod === "function" && "authMethod" in value) {
-          return value;
-        }
-      }
-    }
-    return null;
-  }
-
-  function spoofChatGPTAuthMethod(element) {
-    const auth = authContextValueFrom(element);
-    if (!auth || auth.authMethod === "chatgpt") return false;
-    auth.setAuthMethod("chatgpt");
-    return true;
-  }
-
-  function pluginInstallCandidates() {
-    return Array.from(document.querySelectorAll([
-      "button:disabled",
-      "button:disabled.w-full.justify-center",
-      "button[aria-disabled='true']",
-      "[role='button'][aria-disabled='true']",
-      "button[data-disabled]",
-      "[role='button'][data-disabled]",
-      "button.cursor-not-allowed",
-      "[role='button'][aria-disabled='true'].cursor-not-allowed",
-      "[role='button'].cursor-not-allowed",
-      "button.pointer-events-none",
-      "[role='button'].pointer-events-none",
-    ].join(",")));
-  }
-
-  function pluginEntryButton() {
-    const byIcon = document.querySelector(`${pluginNavButtonSelector} ${pluginSvgPathSelector}`)?.closest("button");
-    if (byIcon) return byIcon;
-    return Array.from(document.querySelectorAll(pluginNavButtonSelector)).find((button) => {
-      const text = visibleText(button.textContent);
-      return text === "插件" || text === "Plugins" || text === "插件 - 已解锁" || text === "Plugins - Unlocked";
-    }) || null;
-  }
-
-  function labelUnlockedPluginEntry(button) {
-    const labelTextNode = Array.from(button.querySelectorAll("span, div")).reverse()
-      .flatMap((node) => Array.from(node.childNodes))
-      .find((node) => node.nodeType === 3 && ["插件", "Plugins", "插件 - 已解锁", "Plugins - Unlocked"].includes(visibleText(node.nodeValue)));
-    if (!labelTextNode) return;
-    const current = visibleText(labelTextNode.nodeValue);
-    labelTextNode.nodeValue = current.startsWith("Plugins") ? "Plugins - Unlocked" : "插件 - 已解锁";
-  }
-
-  function enablePluginEntry() {
-    if (!enhancerSettings().mustInstallPluginsEnabled) return;
-    const pluginButton = pluginEntryButton();
-    if (!pluginButton) return;
-    spoofChatGPTAuthMethod(pluginButton);
-    pluginButton.disabled = false;
-    pluginButton.removeAttribute("disabled");
-    pluginButton.style.display = "";
-    pluginButton.querySelectorAll("*").forEach((node) => {
-      node.style.display = "";
-    });
-    labelUnlockedPluginEntry(pluginButton);
-    const reactPropsKey = Object.keys(pluginButton).find((key) => key.startsWith("__reactProps"));
-    if (reactPropsKey) {
-      pluginButton[reactPropsKey].disabled = false;
-    }
-    if (pluginButton.dataset.aiStrategistPluginEnabled === "true") return;
-    pluginButton.dataset.aiStrategistPluginEnabled = "true";
-    pluginButton.addEventListener("click", () => {
-      spoofChatGPTAuthMethod(pluginButton);
-    }, true);
-  }
-
-  function installButtonLabel(element) {
-    return visibleText(element.textContent);
-  }
-
-  function pluginInstallSurfaceVisible() {
-    const selectors = [
-      "[role='dialog']",
-      "[data-radix-dialog-content]",
-      "main",
-      "[data-testid*='plugin']",
-      "[data-testid*='connector']",
-    ];
-    const surfaces = Array.from(document.querySelectorAll(selectors.join(",")));
-    return surfaces.some((surface) => {
-      const text = visibleText(surface.textContent || "");
-      return (
-        hasAnyText(text, ["install", "app unavailable", "connector unavailable", "安装", "应用不可用", "插件安装失败"])
-        && hasAnyText(text, ["plugin", "connector", "chrome", "openai-bundled", "插件", "连接器"])
-      );
-    });
-  }
-
-  function looksLikeInstallControl(button) {
-    const label = installButtonLabel(button);
-    if (hasAnyText(label, ["install", "add", "enable", "安装", "添加", "启用", "必须装"])) {
-      return true;
-    }
-    const card = button.closest("[role='dialog'], [data-radix-dialog-content], [data-testid*='plugin'], [data-testid*='connector'], article, li, div");
-    const cardText = visibleText(card?.textContent || "");
-    return hasAnyText(cardText, ["app unavailable", "connector unavailable", "应用不可用", "连接器不可用", "插件安装失败"]);
-  }
-
-  function unblockPluginInstallButton(button) {
-    button.disabled = false;
-    button.removeAttribute("disabled");
-    button.removeAttribute("aria-disabled");
-    button.removeAttribute("data-disabled");
-    button.classList.remove("disabled", "opacity-50", "cursor-not-allowed", "pointer-events-none");
-    button.style.pointerEvents = "auto";
-    button.tabIndex = 0;
-    button.dataset.aiStrategistMustInstallUnlocked = "true";
-    const reactPropsKey = Object.keys(button).find((key) => key.startsWith("__reactProps"));
-    if (reactPropsKey) {
-      button[reactPropsKey].disabled = false;
-      button[reactPropsKey]["aria-disabled"] = false;
-      button[reactPropsKey]["data-disabled"] = false;
-    }
-  }
-
-  function labelMustInstallButton(button) {
-    const textNode = Array.from(button.childNodes).find((node) => {
-      const text = visibleText(node.nodeValue);
-      return node.nodeType === 3 && hasAnyText(text, ["install", "add", "安装", "添加", "必须装"]);
-    });
-    if (textNode) {
-      textNode.nodeValue = "必须装";
-      return;
-    }
-    const labelNode = Array.from(button.querySelectorAll("span, div")).find((node) => {
-      return hasAnyText(node.textContent, ["install", "add", "安装", "添加", "必须装"]);
-    });
-    if (labelNode) {
-      labelNode.textContent = "必须装";
-    }
-  }
-
-  function unlockMustInstallPluginButtons() {
-    if (!enhancerSettings().mustInstallPluginsEnabled) return;
-    if (!pluginInstallSurfaceVisible()) return;
-    spoofChatGPTAuthMethod(document.body);
-    pluginInstallCandidates().forEach((button) => {
-      if (!looksLikeInstallControl(button)) return;
-      unblockPluginInstallButton(button);
-      labelMustInstallButton(button);
-    });
-  }
-
-  function escapeHtml(value) {
+  function htmlEscape(value) {
     return String(value || "")
-      .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
@@ -1220,10 +1059,8 @@
 
   function scan() {
     installStyle();
-    enablePluginEntry();
     sessionRows().forEach((row) => attachAction(row));
     applyProjectMoveProjection();
-    unlockMustInstallPluginButtons();
   }
 
   window.__aiStrategistEnhancerInternals = {

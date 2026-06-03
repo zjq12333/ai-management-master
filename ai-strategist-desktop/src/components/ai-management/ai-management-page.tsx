@@ -1,37 +1,28 @@
 import { useState } from "react";
-import { FileCode2, Server, Sparkles } from "lucide-react";
+import { Server, Sparkles, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { CustomInstructionsPage } from "@/components/custom-instructions/custom-instructions-page";
 import { McpPage } from "@/components/mcp/mcp-page";
 import { SkillsPage } from "@/components/skills/skills-page";
 import { cn } from "@/lib/utils";
 
-type AIManagementSection = "strategyTemplates" | "mcp" | "skills";
+type AIManagementSection = "mcp" | "skills";
 
 const sections: {
   value: AIManagementSection;
   labelKey: string;
-  icon: typeof FileCode2;
+  icon: LucideIcon;
 }[] = [
-  { value: "strategyTemplates", labelKey: "aiManagement.strategyTemplates", icon: FileCode2 },
   { value: "mcp", labelKey: "nav.mcp", icon: Server },
   { value: "skills", labelKey: "nav.skills", icon: Sparkles },
 ];
 
 export function AIManagementPage() {
   const { t } = useTranslation();
-  const [activeSection, setActiveSection] = useState<AIManagementSection>("strategyTemplates");
+  const [activeSection, setActiveSection] = useState<AIManagementSection>("mcp");
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">{t("aiManagement.title")}</h1>
-          <p className="max-w-2xl text-sm text-muted-foreground">{t("aiManagement.description")}</p>
-        </div>
-      </div>
-
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-h-0 flex-1 flex-col gap-4">
         <div
           role="tablist"
@@ -59,7 +50,6 @@ export function AIManagementPage() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto">
-          {activeSection === "strategyTemplates" && <CustomInstructionsPage />}
           {activeSection === "mcp" && <McpPage />}
           {activeSection === "skills" && <SkillsPage />}
         </div>

@@ -5,6 +5,7 @@ use super::prelaunch_bridge::{
 use super::prelaunch_provider::{
     provider_json_for_launch, read_model_provider_from_codex_config, reusable_hybrid_provider_key,
 };
+use super::model_relay::start_model_relay;
 use serde_json::{json, Value};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -36,12 +37,12 @@ fn run_bridge_launch(
         provider_json,
         hide_official_quota_notice,
         restore_history,
-    );
+    )?;
     run_bridge_command(command)
 }
 
 fn run_bridge_enhanced_launch(codex_home: &str) -> Result<Value, String> {
-    run_bridge_command(bridge_command("enhanced-launch", codex_home))
+    run_bridge_command(bridge_command("enhanced-launch", codex_home)?)
 }
 
 fn run_bridge_command(command: Vec<String>) -> Result<Value, String> {
@@ -144,7 +145,7 @@ fn run_bridge_repair(
             projectless_mode,
             unarchive_selected,
         },
-    );
+    )?;
     run_bridge_command(command)
 }
 
@@ -579,7 +580,7 @@ fn prelaunch_environment_payload(codex_home: &str) -> Value {
         },
         "bridge": {
             "programPath": bridge_program.as_ref().map(|path| path.display().to_string()),
-            "scriptPath": bridge_script.display().to_string(),
+            "scriptPath": bridge_script.as_ref().map(|path| path.display().to_string()),
             "exePath": bridge_exe.as_ref().map(|path| path.display().to_string()),
             "usesExe": bridge_exe.is_some(),
             "available": bridge_program.is_some(),
@@ -697,6 +698,9 @@ pub fn prelaunch_launch(
     restore_history: Option<bool>,
 ) -> Result<Value, String> {
     let provider_json = provider_json_for_launch(&codex_home, mode.as_deref(), provider_json.as_deref())?;
+    if matches!(mode.as_deref(), Some("api" | "hybrid")) && provider_json.as_deref().is_some_and(|payload| payload.contains("ai_strategist_model_bucket")) {
+        start_model_relay()?;
+    }
     run_bridge_launch(
         &codex_home,
         mode.as_deref(),
@@ -753,15 +757,13 @@ mod tests {
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn bridge_command_uses_resolved_bridge_script_for_mutating_subcommands() {
+    fn bridge_command_fails_clearly_when_bridge_is_missing() {
         let _guard = ENV_LOCK.lock().expect("env lock");
         let previous = std::env::var_os("AI_STRATEGIST_PRELAUNCH_BRIDGE");
         std::env::remove_var("AI_STRATEGIST_PRELAUNCH_BRIDGE");
-        let command = bridge_command("repair", r"C:\Users\test\.codex");
-        assert!(!command[0].is_empty());
-        assert_eq!(command[0], python_command());
-        assert!(command[1].ends_with("prelaunch_bridge.py"));
-        assert_eq!(command[2], "repair");
+        let error = bridge_command("repair", r"C:\Users\test\.codex")
+            .expect_err("missing bridge should fail before spawning");
+        assert!(error.contains("prelaunch_bridge_missing"));
         if let Some(previous) = previous {
             std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", previous);
         }
@@ -778,7 +780,7 @@ mod tests {
         fs::write(&bridge, "# test bridge").expect("write bridge");
         std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", &bridge);
 
-        assert_eq!(bridge_script_path(), bridge);
+        assert_eq!(bridge_script_path().as_deref(), Some(bridge.as_path()));
         fs::remove_file(&bridge).ok();
 
         if let Some(previous) = previous {
@@ -799,7 +801,8 @@ mod tests {
         fs::write(&bridge, b"test bridge").expect("write bridge");
         std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", &bridge);
 
-        let command = bridge_command("repair", r"C:\Users\test\.codex");
+        let command =
+            bridge_command("repair", r"C:\Users\test\.codex").expect("bridge command");
         assert_eq!(command[0], bridge.display().to_string());
         assert_eq!(command[1], "repair");
         assert!(!command.contains(&python_command()));
@@ -813,7 +816,7 @@ mod tests {
     }
 
     #[test]
-    fn bridge_script_path_falls_back_to_development_repo_bridge() {
+    fn bridge_script_path_does_not_fall_back_to_development_repo_bridge() {
         let _guard = ENV_LOCK.lock().expect("env lock");
         let previous = std::env::var_os("AI_STRATEGIST_PRELAUNCH_BRIDGE");
         std::env::set_var(
@@ -821,7 +824,10 @@ mod tests {
             repo_root_from_manifest().join("missing_bridge.py"),
         );
 
-        assert_eq!(bridge_script_path(), repo_root_from_manifest().join("prelaunch_bridge.py"));
+        assert!(bridge_script_path().is_none());
+        let error = bridge_command("repair", r"C:\Users\test\.codex")
+            .expect_err("missing explicit bridge should not fall back to repo script");
+        assert!(error.contains("prelaunch_bridge_missing"));
 
         if let Some(previous) = previous {
             std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", previous);
@@ -847,6 +853,15 @@ mod tests {
 
     #[test]
     fn launch_command_can_forward_hide_official_quota_notice_flag() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var_os("AI_STRATEGIST_PRELAUNCH_BRIDGE");
+        let bridge = std::env::temp_dir().join(format!(
+            "ai-strategist-custom-bridge-{}.py",
+            std::process::id()
+        ));
+        fs::write(&bridge, "# test bridge").expect("write bridge");
+        std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", &bridge);
+
         let command = bridge_command_with_mode(
             "launch",
             r"C:\Users\test\.codex",
@@ -854,16 +869,32 @@ mod tests {
             Some(r#"{"key":"lac"}"#),
             true,
             true,
-        );
+        )
+        .expect("bridge command");
 
         assert!(command.contains(&"--hide-official-quota-notice".to_string()));
         assert!(command.contains(&"--restore-history".to_string()));
         assert!(command.contains(&"--provider-json".to_string()));
         assert!(command.contains(&r#"{"key":"lac"}"#.to_string()));
+        fs::remove_file(&bridge).ok();
+        if let Some(previous) = previous {
+            std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", previous);
+        } else {
+            std::env::remove_var("AI_STRATEGIST_PRELAUNCH_BRIDGE");
+        }
     }
 
     #[test]
     fn repair_command_can_forward_advanced_recovery_options() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var_os("AI_STRATEGIST_PRELAUNCH_BRIDGE");
+        let bridge = std::env::temp_dir().join(format!(
+            "ai-strategist-custom-bridge-{}.py",
+            std::process::id()
+        ));
+        fs::write(&bridge, "# test bridge").expect("write bridge");
+        std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", &bridge);
+
         let command = bridge_command_with_recovery_options(
             "repair",
             r"C:\Users\test\.codex",
@@ -875,7 +906,8 @@ mod tests {
                 projectless_mode: Some("all"),
                 unarchive_selected: true,
             },
-        );
+        )
+        .expect("bridge command");
 
         assert!(command.contains(&"--include-archived".to_string()));
         assert!(command.contains(&"--allow-missing-cwd".to_string()));
@@ -884,6 +916,12 @@ mod tests {
         assert!(command.contains(&"--projectless-mode".to_string()));
         assert!(command.contains(&"all".to_string()));
         assert!(command.contains(&"--unarchive-selected".to_string()));
+        fs::remove_file(&bridge).ok();
+        if let Some(previous) = previous {
+            std::env::set_var("AI_STRATEGIST_PRELAUNCH_BRIDGE", previous);
+        } else {
+            std::env::remove_var("AI_STRATEGIST_PRELAUNCH_BRIDGE");
+        }
     }
 
     #[test]
@@ -1134,7 +1172,10 @@ model_provider = "openai"
 
 
     #[test]
-    fn enhanced_relay_launch_does_not_build_provider_json() {
+    fn hybrid_launch_requires_model_bucket_instead_of_reusing_config_provider() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var_os("AI_STRATEGIST_MODEL_GATEWAY_CONFIG");
+        std::env::set_var("AI_STRATEGIST_MODEL_GATEWAY_CONFIG", r"C:\missing\model-gateway.json");
         let temp_root = std::env::temp_dir().join(format!(
             "ai-strategist-enhanced-reuse-provider-test-{}",
             std::process::id()
@@ -1159,11 +1200,17 @@ experimental_bearer_token = "sk-test"
             &temp_root.display().to_string(),
             Some("hybrid"),
             None,
-        )
-        .expect("hybrid enhanced launch should not validate provider config");
+        );
 
         let _ = fs::remove_dir_all(&temp_root);
-        assert!(provider_json.is_none());
+        match previous {
+            Some(value) => std::env::set_var("AI_STRATEGIST_MODEL_GATEWAY_CONFIG", value),
+            None => std::env::remove_var("AI_STRATEGIST_MODEL_GATEWAY_CONFIG"),
+        }
+        assert_eq!(
+            provider_json.expect_err("hybrid launch should not reuse old config providers"),
+            "No enabled model bucket relay is configured for this launch mode."
+        );
     }
 
     #[test]

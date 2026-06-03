@@ -222,147 +222,12 @@ def hide_official_quota_notice_enabled(codex_home: Path) -> bool:
     return bool(isinstance(enhancer, dict) and enhancer.get("hideOfficialQuotaNoticeEnabled"))
 
 
-def must_install_plugins_enabled(codex_home: Path) -> bool:
-    enhancer = load_enhancer_settings(codex_home).get("enhancer")
-    return bool(isinstance(enhancer, dict) and enhancer.get("mustInstallPluginsEnabled"))
-
-
-def bundled_plugin_cache_root(codex_home: Path, plugin_name: str) -> Path:
-    return codex_home / "plugins" / "cache" / "openai-bundled" / plugin_name
-
-
-def bundled_plugin_cache_path(codex_home: Path, plugin_name: str) -> Path:
-    root = bundled_plugin_cache_root(codex_home, plugin_name)
-    latest = root / "latest"
-    if latest.exists():
-        return latest
-    versions = [
-        path
-        for path in root.iterdir()
-        if path.is_dir() and (path / ".codex-plugin" / "plugin.json").exists()
-    ] if root.exists() else []
-    versions.sort(key=lambda path: path.stat().st_mtime, reverse=True)
-    return versions[0] if versions else latest
-
-
-def chrome_plugin_cache_path(codex_home: Path) -> Path:
-    return bundled_plugin_cache_path(codex_home, "chrome")
-
-
-def chrome_plugin_locally_ready(codex_home: Path) -> bool:
-    scripts = chrome_plugin_cache_path(codex_home) / "scripts"
-    check_extension = scripts / "check-extension-installed.js"
-    check_native_host = scripts / "check-native-host-manifest.js"
-    if not check_extension.exists() or not check_native_host.exists():
-        return False
-    for script in (check_extension, check_native_host):
-        result = subprocess.run(
-            ["node", str(script)],
-            cwd=str(scripts),
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            return False
-    return True
-
-
-def bundled_plugin_locally_ready(codex_home: Path, plugin_name: str) -> bool:
-    plugin_path = bundled_plugin_cache_path(codex_home, plugin_name)
-    return (plugin_path / ".codex-plugin" / "plugin.json").exists()
-
-
-def ensure_plugin_enabled_in_config(config_path: Path, plugin_id: str) -> bool:
-    text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
-    header = f'[plugins."{plugin_id}"]'
-    if header in text:
-        next_text = re.sub(
-            rf'(\[plugins\."{re.escape(plugin_id)}"\]\s*)enabled\s*=\s*false',
-            rf'\1enabled = true',
-            text,
-            count=1,
-        )
-        if next_text != text:
-            config_path.write_text(next_text, encoding="utf-8")
-            return True
-        header_match = re.search(
-            rf'(\[plugins\."{re.escape(plugin_id)}"\]\s*)',
-            text,
-            flags=re.MULTILINE,
-        )
-        if not header_match:
-            return False
-        section_start = header_match.end()
-        next_section = re.search(r"\n\[", text[section_start:])
-        section_end = section_start + next_section.start() if next_section else len(text)
-        section = text[section_start:section_end]
-        if re.search(r"(?m)^\s*enabled\s*=", section):
-            return False
-        next_text = f"{text[:section_start]}enabled = true\n{text[section_start:]}"
-        config_path.write_text(next_text, encoding="utf-8")
-        return True
-    separator = "" if text.endswith("\n") or not text else "\n"
-    config_path.write_text(f'{text}{separator}\n{header}\nenabled = true\n', encoding="utf-8")
-    return True
-
-
-def ensure_must_install_local_plugins(codex_home: Path) -> dict[str, object]:
-    if not must_install_plugins_enabled(codex_home):
-        return {"enabled": False, "changed": False, "plugins": []}
-    config_path = config_path_from_codex_home(codex_home)
-    raw = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
-    plugins_to_enable: list[str] = []
-    readiness_errors: list[str] = []
-    for spec in MUST_INSTALL_PLUGIN_SPECS:
-        plugin_id = str(spec["id"])
-        plugin_name = str(spec["name"])
-        readiness = str(spec["readiness"])
-        if readiness == "bundled":
-            if bundled_plugin_locally_ready(codex_home, plugin_name):
-                plugins_to_enable.append(plugin_id)
-            else:
-                readiness_errors.append(f"{plugin_id}_not_locally_ready")
-        elif readiness == "chrome":
-            if chrome_plugin_locally_ready(codex_home):
-                plugins_to_enable.append(plugin_id)
-            else:
-                readiness_errors.append(f"{plugin_id}_not_locally_ready")
-        else:
-            readiness_errors.append(f"{plugin_id}_unsupported_readiness_{readiness}")
-
-    if not plugins_to_enable:
-        return {"enabled": True, "changed": False, "plugins": [], "errors": readiness_errors}
-
-    changed_plugins = [
-        plugin_id
-        for plugin_id in plugins_to_enable
-        if ensure_plugin_enabled_in_config(config_path, plugin_id)
-    ]
-    changed = bool(changed_plugins)
-    backup_path = ""
-    if changed:
-        backup = config_path.with_name(
-            f"config.toml.backup_ai_manager_must_install_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        )
-        backup.write_text(raw, encoding="utf-8")
-        backup_path = str(backup)
-    return {
-        "enabled": True,
-        "changed": changed,
-        "plugins": changed_plugins,
-        "available_plugins": plugins_to_enable,
-        "errors": readiness_errors,
-        "backup_path": backup_path,
-    }
-
 
 def enhancer_enabled(codex_home: Path) -> bool:
     return (
         chat_info_move_enabled(codex_home)
         or one_click_handoff_enabled(codex_home)
         or hide_official_quota_notice_enabled(codex_home)
-        or must_install_plugins_enabled(codex_home)
     )
 
 
@@ -602,13 +467,50 @@ def resolved_python_runtime_executable() -> str:
     if configured and not runtime_path.exists():
         runtime_path = Path(sys.executable)
     if bundled and not configured:
-        for command in ("pythonw", "python", "py"):
+        candidates: list[Path] = []
+        for env_key in ("LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"):
+            root = os.environ.get(env_key)
+            if root:
+                candidates.extend(
+                    [
+                        Path(root) / "Programs" / "Python" / "Python312" / "python.exe",
+                        Path(root) / "Programs" / "Python" / "Python311" / "python.exe",
+                    ]
+                )
+        candidates.extend(
+            [
+                Path(r"D:\Tools\Python312\python.exe"),
+                Path(r"C:\Python312\python.exe"),
+                Path(r"C:\Python311\python.exe"),
+            ]
+        )
+        for command in ("python.exe", "pythonw.exe", "python", "pythonw", "py.exe", "py"):
             resolved = shutil.which(command)
             if resolved:
-                runtime_path = Path(resolved)
+                candidates.append(Path(resolved))
+        for candidate in candidates:
+            if not candidate.exists():
+                continue
+            try:
+                if candidate.resolve() == Path(sys.executable).resolve():
+                    continue
+            except Exception:
+                pass
+            if python_runtime_supports_enhancer_modules(candidate):
+                runtime_path = candidate
                 break
+        else:
+            raise RuntimeError("Unable to locate a Python runtime with requests and websocket for enhancer launch.")
     if configured and runtime_path.exists() and not python_runtime_supports_enhancer_modules(runtime_path):
         runtime_path = Path(sys.executable)
+    if bundled:
+        try:
+            if runtime_path.resolve() == Path(sys.executable).resolve():
+                raise RuntimeError("Enhancer launch resolved to prelaunch_bridge.exe instead of a Python runtime.")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
     if os.name == "nt":
         pythonw = runtime_path.with_name("pythonw.exe")
         if pythonw.exists():
@@ -698,6 +600,26 @@ def enhancer_ready_stable_seconds() -> float:
         except ValueError:
             pass
     return ENHANCER_READY_STABLE_SECONDS
+
+
+def enhancer_runtime_ready_timeout_seconds() -> float:
+    raw = os.environ.get("AI_STRATEGIST_ENHANCER_RUNTIME_READY_TIMEOUT_SECONDS", "").strip()
+    if raw:
+        try:
+            return max(1.0, float(raw))
+        except ValueError:
+            pass
+    return max(70.0, cdp_wait_timeout_seconds() + 45.0)
+
+
+def cdp_wait_timeout_seconds() -> float:
+    raw = os.environ.get("AI_STRATEGIST_CDP_WAIT_TIMEOUT_SECONDS", "").strip()
+    if raw:
+        try:
+            return max(1.0, float(raw))
+        except ValueError:
+            pass
+    return CDP_WAIT_TIMEOUT_SECONDS
 
 
 def _can_bind_loopback_port(port: int) -> bool:
@@ -1207,8 +1129,9 @@ def launch_codex_desktop() -> dict[str, object]:
             pid = wait_for_new_codex_pid(existing_pids)
             visible_pid = wait_for_visible_codex_window()
             foreground = focus_codex_window(visible_pid or pid)
+            activated = bool(foreground.get("ok")) or visible_pid is not None or pid is not None
             return {
-                "ok": bool(foreground.get("ok")),
+                "ok": activated,
                 "method": "appid_reactivate_stale_background",
                 "appid": appid,
                 "processes": running,
@@ -1217,7 +1140,7 @@ def launch_codex_desktop() -> dict[str, object]:
                 "visible_pid": visible_pid,
                 "foreground": foreground,
                 "error": None
-                if bool(foreground.get("ok"))
+                if activated
                 else "Codex was already running in the background, and AppID reactivation still did not produce a visible window.",
             }
 
@@ -1243,14 +1166,15 @@ def launch_codex_desktop() -> dict[str, object]:
         pid = wait_for_new_codex_pid(existing_pids)
         visible_pid = wait_for_visible_codex_window()
         foreground = focus_codex_window(visible_pid or pid)
+        activated = bool(foreground.get("ok")) or visible_pid is not None or pid is not None
         return {
-            "ok": bool(foreground.get("ok")),
+            "ok": activated,
             "method": "appid",
             "appid": appid,
             "pid": pid,
             "visible_pid": visible_pid,
             "foreground": foreground,
-            "error": None if bool(foreground.get("ok")) else "Codex AppID activation did not produce a visible window.",
+            "error": None if activated else "Codex AppID activation did not produce a visible window.",
         }
 
     if exe:
@@ -1281,7 +1205,11 @@ def launch_codex_desktop() -> dict[str, object]:
     }
 
 
-def _launch_codex_desktop_with_args_once(normalized_args: list[str], debug_port: int | None) -> dict[str, object]:
+def _launch_codex_desktop_with_args_once(
+    normalized_args: list[str],
+    debug_port: int | None,
+    cdp_timeout_seconds: float | None = None,
+) -> dict[str, object]:
     env = codex_process_environment()
     proxy_keys = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
     exe = resolved_codex_desktop_exe()
@@ -1300,7 +1228,7 @@ def _launch_codex_desktop_with_args_once(normalized_args: list[str], debug_port:
                         os.environ.pop(key, None)
                     else:
                         os.environ[key] = value
-            if debug_port is not None and not wait_for_cdp(debug_port):
+            if debug_port is not None and not wait_for_cdp(debug_port, timeout_seconds=cdp_timeout_seconds or CDP_WAIT_TIMEOUT_SECONDS):
                 return {
                     "ok": False,
                     "method": "product_resolved_packaged_activation",
@@ -1326,7 +1254,7 @@ def _launch_codex_desktop_with_args_once(normalized_args: list[str], debug_port:
             }
 
         process = subprocess.Popen([exe, *normalized_args], cwd=str(exe_path.parent), env=env, **gui_launch_options())
-        if debug_port is not None and not wait_for_cdp(debug_port):
+        if debug_port is not None and not wait_for_cdp(debug_port, timeout_seconds=cdp_timeout_seconds or CDP_WAIT_TIMEOUT_SECONDS):
             return {
                 "ok": False,
                 "method": "product_resolved_exe",
@@ -1428,6 +1356,7 @@ def launch_codex_desktop_with_retry(
     attempts: int = 3,
     retry_cooldown_seconds: float = 1.5,
     allow_takeover: bool = False,
+    cdp_wait_timeout_seconds: float | None = None,
 ) -> dict[str, object]:
     return desktop_launcher.launch_codex_desktop_with_retry(
         extra_args,
@@ -1444,7 +1373,11 @@ def launch_codex_desktop_with_retry(
             timeout_seconds=timeout_seconds,
             cooldown_seconds=cooldown_seconds,
         ),
-        launch_once=_launch_codex_desktop_with_args_once,
+        launch_once=lambda normalized_args, debug_port: _launch_codex_desktop_with_args_once(
+            normalized_args,
+            debug_port,
+            cdp_timeout_seconds=cdp_wait_timeout_seconds,
+        ),
         attempts=attempts,
         retry_cooldown_seconds=retry_cooldown_seconds,
         current_runtime_pid=os.getpid() if os.name == "nt" else None,
@@ -1466,6 +1399,8 @@ def launch_codex_desktop_with_enhancer(codex_home: Path, launch_mode: str = "off
             str(codex_home.expanduser()),
             "--launch-mode",
             launch_mode,
+            "--cdp-timeout-seconds",
+            str(cdp_wait_timeout_seconds()),
             "--status-file",
             str(status_path),
             "--log-file",
@@ -1474,7 +1409,7 @@ def launch_codex_desktop_with_enhancer(codex_home: Path, launch_mode: str = "off
         cwd=str(runtime_script.parent),
         **enhancer_runtime_launch_options(),
     )
-    deadline = time.time() + 30.0
+    deadline = time.time() + enhancer_runtime_ready_timeout_seconds()
     try:
         while time.time() < deadline:
             if status_path.exists():
@@ -1489,6 +1424,17 @@ def launch_codex_desktop_with_enhancer(codex_home: Path, launch_mode: str = "off
                 payload.setdefault("launch_mode", launch_mode)
                 payload.setdefault("runtime_python", runtime_python)
                 payload.setdefault("log_file", str(log_path))
+                if (
+                    launch_mode == "existing-session"
+                    and not payload.get("ok")
+                    and CDP_NOT_READY_ERROR_FRAGMENT in str(payload.get("error") or "")
+                    and (payload.get("pid") or payload.get("appid") or payload.get("exe"))
+                ):
+                    payload["ok"] = True
+                    payload["enhancer_attached"] = False
+                    payload["warning"] = payload.get("error")
+                    payload["error"] = None
+                    return payload
                 if payload.get("ok"):
                     debug_port = payload.get("debug_port")
                     stable_deadline = time.time() + enhancer_ready_stable_seconds()

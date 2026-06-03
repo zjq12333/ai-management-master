@@ -35,8 +35,6 @@ pub struct CodexPaths {
     pub voice_runtime_path: PathBuf,
     pub launch_agent_path: PathBuf,
     pub global_agents_path: PathBuf,
-    pub custom_instructions_dir: PathBuf,
-    pub custom_instruction_history_dir: PathBuf,
 }
 
 impl CodexPaths {
@@ -48,7 +46,6 @@ impl CodexPaths {
     pub fn from_home(codex_home: PathBuf) -> Self {
         let accounts_dir = codex_home.join("accounts");
         let codexmate_dir = codex_home.join("codexmate");
-        let custom_instructions_dir = codexmate_dir.join("custom-instructions");
         let launch_agent_path = Self::resolve_launch_agent_path();
 
         // Keep this migration so older installs do not lose local app data.
@@ -81,10 +78,8 @@ impl CodexPaths {
             voice_workspace_path: codexmate_dir.join("voice-workspace.json"),
             voice_runtime_path: codexmate_dir.join("voice-runtime.json"),
             global_agents_path: codex_home.join("AGENTS.md"),
-            custom_instruction_history_dir: custom_instructions_dir.join("history"),
             accounts_dir,
             codexmate_dir,
-            custom_instructions_dir,
             launch_agent_path,
             codex_home,
         }
@@ -118,8 +113,6 @@ impl CodexPaths {
         std::fs::create_dir_all(&self.registry_backups_dir)?;
         std::fs::create_dir_all(&self.codexmate_dir)?;
         std::fs::create_dir_all(&self.skill_backups_dir)?;
-        std::fs::create_dir_all(&self.custom_instructions_dir)?;
-        std::fs::create_dir_all(&self.custom_instruction_history_dir)?;
         Ok(())
     }
 }

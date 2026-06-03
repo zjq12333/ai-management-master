@@ -44,6 +44,9 @@ const EnhancerPage = lazy(() =>
 const AIManagementPage = lazy(() =>
   import("@/components/ai-management/ai-management-page").then((module) => ({ default: module.AIManagementPage })),
 );
+const ModelManagementPage = lazy(() =>
+  import("@/components/model-management/model-management-page").then((module) => ({ default: module.ModelManagementPage })),
+);
 const MaintenancePage = lazy(() =>
   import("@/components/maintenance/maintenance-page").then((module) => ({ default: module.MaintenancePage })),
 );
@@ -92,9 +95,9 @@ function MainApp() {
         import("@/components/login-repair/login-repair-page"),
         import("@/components/enhancer/enhancer-page"),
         import("@/components/ai-management/ai-management-page"),
+        import("@/components/model-management/model-management-page"),
         import("@/components/mcp/mcp-page"),
         import("@/components/skills/skills-page"),
-        import("@/components/custom-instructions/custom-instructions-page"),
         import("@/components/maintenance/maintenance-page"),
         import("@/components/settings/settings-page"),
       ]);
@@ -111,6 +114,8 @@ function MainApp() {
         return <EnhancerPage />;
       case "aiManagement":
         return <AIManagementPage />;
+      case "modelManagement":
+        return <ModelManagementPage />;
       case "maintenance":
         return <MaintenancePage />;
       case "settings":
@@ -142,6 +147,7 @@ function MainApp() {
     "loginRepair",
     "enhancer",
     "aiManagement",
+    "modelManagement",
     "maintenance",
     "settings",
   ];

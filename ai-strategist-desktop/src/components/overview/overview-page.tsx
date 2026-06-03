@@ -10,7 +10,7 @@ const overviewCards = [
   },
   {
     title: "其他模块保留",
-    desc: "自定义指令、MCP、Skills、维护和设置暂时继续保留。",
+    desc: "增强登录、MCP、Skills、维护和设置继续保留。",
     icon: ClipboardCheck,
   },
   {

@@ -26,8 +26,6 @@
   SkillTranslationCachePayload,
   SkillTranslationPayload,
   SkillTranslationRequestItem,
-  CustomInstructionPreviewPayload,
-  CustomInstructionStatePayload,
 } from "@/types";
 import type {
   PrelaunchLaunchPayload,
@@ -41,6 +39,16 @@ import type {
 } from "@/types/prelaunch";
 import type { EnhancerSettingsPayload } from "@/types/enhancer";
 import type { LacControlSpaceStatusPayload } from "@/types/lac";
+import type {
+  ModelGatewaySnapshot,
+  ModelProviderHealthPayload,
+  ModelProviderSavePayload,
+  ModelRelayConfigPayload,
+  ModelRelayLogEntry,
+  ModelRelayStatusPayload,
+  ModelRouteSavePayload,
+  UpstreamModelsPayload,
+} from "@/types/model-management";
 import { isTauriRuntime } from "@/lib/tauri-runtime";
 
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -54,6 +62,48 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 export const api = {
   lacControlSpaceStatus: () =>
     invoke<LacControlSpaceStatusPayload>("lac_control_space_status"),
+
+  modelGatewaySnapshot: () =>
+    invoke<ModelGatewaySnapshot>("model_gateway_snapshot"),
+
+  saveModelProvider: (payload: ModelProviderSavePayload) =>
+    invoke<ModelGatewaySnapshot>("save_model_provider", { payload }),
+
+  deleteModelProvider: (providerId: string) =>
+    invoke<ModelGatewaySnapshot>("delete_model_provider", { providerId }),
+
+  setDefaultModelProvider: (providerId: string) =>
+    invoke<ModelGatewaySnapshot>("set_default_model_provider", { providerId }),
+
+  saveModelRoute: (payload: ModelRouteSavePayload) =>
+    invoke<ModelGatewaySnapshot>("save_model_route", { payload }),
+
+  deleteModelRoute: (routeId: string) =>
+    invoke<ModelGatewaySnapshot>("delete_model_route", { routeId }),
+
+  checkModelProviderHealth: (providerId: string) =>
+    invoke<ModelProviderHealthPayload>("check_model_provider_health", { providerId }),
+
+  listUpstreamModels: (providerId: string) =>
+    invoke<UpstreamModelsPayload>("list_upstream_models", { providerId }),
+
+  modelRelayStatus: () =>
+    invoke<ModelRelayStatusPayload>("model_relay_status"),
+
+  saveModelRelayConfig: (payload: ModelRelayConfigPayload) =>
+    invoke<ModelRelayStatusPayload>("save_model_relay_config", { payload }),
+
+  startModelRelay: () =>
+    invoke<ModelRelayStatusPayload>("start_model_relay"),
+
+  stopModelRelay: () =>
+    invoke<ModelRelayStatusPayload>("stop_model_relay"),
+
+  restartModelRelay: () =>
+    invoke<ModelRelayStatusPayload>("restart_model_relay"),
+
+  modelRelayLogs: () =>
+    invoke<ModelRelayLogEntry[]>("model_relay_logs"),
 
   prelaunchStatus: (codexHome: string) =>
     invoke<PrelaunchStatusPayload>("prelaunch_status", { codexHome }),
@@ -181,37 +231,6 @@ export const api = {
   deleteSkillBackup: (name: string) =>
     invoke<CoreEnvelope<SkillDeleteBackupPayload>>("delete_skill_backup", { name }),
 
-  loadCustomInstructionState: () =>
-    invoke<CoreEnvelope<CustomInstructionStatePayload>>("load_custom_instruction_state"),
-
-  previewCustomInstructionApply: (params: { templateId?: string; templateCode?: string; templateTitle?: string; content: string; source?: string } | string, content?: string) => {
-    const payload = typeof params === "string" ? { content: params, templateId: params, templateCode: params } : params;
-    return invoke<CoreEnvelope<CustomInstructionPreviewPayload>>("preview_custom_instruction_apply", {
-      templateId: payload.templateId ?? payload.templateCode ?? "manual",
-      templateCode: payload.templateCode,
-      templateTitle: payload.templateTitle,
-      content: content ?? payload.content,
-      source: payload.source,
-    });
-  },
-
-  applyCustomInstruction: (params: { templateId?: string; templateCode?: string; templateTitle?: string; content: string; source?: string } | string, content?: string) => {
-    const payload = typeof params === "string" ? { content: content ?? "", templateId: params } : params;
-    return invoke<CoreEnvelope<CustomInstructionStatePayload>>("apply_custom_instruction", {
-      templateId: payload.templateId ?? payload.templateCode ?? "manual",
-      templateCode: payload.templateCode,
-      templateTitle: payload.templateTitle,
-      content: content ?? payload.content,
-      source: payload.source,
-    });
-  },
-
-  clearCustomInstructionBlock: () =>
-    invoke<CoreEnvelope<CustomInstructionStatePayload>>("clear_custom_instruction_block"),
-
-  rollbackCustomInstruction: (historyId?: string) =>
-    invoke<CoreEnvelope<CustomInstructionStatePayload>>("rollback_custom_instruction", historyId ? { historyId } : undefined),
-
   hasNotch: () =>
     invoke<boolean>("has_notch").catch(() => false),
 
@@ -232,9 +251,6 @@ export const api = {
 
   setHideOfficialQuotaNoticeEnabled: (enabled: boolean) =>
     invoke<EnhancerSettingsPayload>("set_hide_official_quota_notice_enabled", { enabled }),
-
-  setMustInstallPluginsEnabled: (enabled: boolean) =>
-    invoke<EnhancerSettingsPayload>("set_must_install_plugins_enabled", { enabled }),
 
   focusMainWindow: () =>
     invoke<void>("focus_main_window"),

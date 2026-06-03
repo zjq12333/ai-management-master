@@ -6,7 +6,12 @@ $ErrorActionPreference = "Stop"
 
 $resolvedRoot = (Resolve-Path -LiteralPath $RepoRoot).ProviderPath
 $primaryExe = Join-Path $resolvedRoot "ai-strategist-desktop\src-tauri\target\release\AI-Strategist.exe"
-$fallbackManagerExe = Join-Path $resolvedRoot "third_party\codex-plus-plus\target\release\codex-plus-plus-manager.exe"
+$debugExe = Join-Path $resolvedRoot "ai-strategist-desktop\src-tauri\target\debug\AI-Strategist.exe"
+$pythonRuntime = Join-Path $resolvedRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $pythonRuntime)) {
+    $pythonRuntime = "D:\Tools\Python312\python.exe"
+}
+$pythonRuntimeDir = Split-Path -Parent $pythonRuntime
 $logDir = Join-Path $env:LOCALAPPDATA "AI-Strategist\logs"
 $logPath = Join-Path $logDir "launcher.log"
 $stdoutPath = Join-Path $logDir "ai-strategist.stdout.log"
@@ -14,11 +19,20 @@ $stderrPath = Join-Path $logDir "ai-strategist.stderr.log"
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
+$env:AI_STRATEGIST_PYTHON_RUNTIME = $pythonRuntime
+$env:AI_STRATEGIST_PYTHON = $pythonRuntime
+if (Test-Path -LiteralPath $pythonRuntimeDir) {
+    $env:PATH = "$pythonRuntimeDir;$env:PATH"
+}
+
 function Write-LaunchLog {
     param([string]$Message)
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     Add-Content -LiteralPath $logPath -Encoding UTF8 -Value "[$timestamp] $Message"
 }
+
+Write-LaunchLog "Development launcher started. RepoRoot=$resolvedRoot"
+Write-LaunchLog "Python runtime: $pythonRuntime"
 
 function Format-Window {
     param($Window)
@@ -160,11 +174,13 @@ if (Test-Path -LiteralPath $primaryExe) {
     exit 0
 }
 
-if (Test-Path -LiteralPath $fallbackManagerExe) {
-    Write-LaunchLog "Primary executable missing. Starting fallback manager: $fallbackManagerExe"
-    Start-Process -FilePath $fallbackManagerExe -WorkingDirectory $resolvedRoot
+if (Test-Path -LiteralPath $debugExe) {
+    Write-LaunchLog "Primary executable missing. Starting debug executable: $debugExe"
+    Start-Process -FilePath $debugExe -WorkingDirectory $resolvedRoot
     exit 0
 }
 
-Write-LaunchLog "No executable found. Primary=$primaryExe Fallback=$fallbackManagerExe"
+Write-LaunchLog "No source-tree AI Strategist executable found. Expected release=$primaryExe debug=$debugExe"
+throw "No source-tree AI Strategist executable was found. Build it first with `pnpm --dir ai-strategist-desktop tauri build` or run the installed AI Strategist shortcut instead."
+Write-LaunchLog "No executable found. Primary=$primaryExe Debug=$debugExe"
 throw "AI Strategist executable was not found. Expected: $primaryExe"

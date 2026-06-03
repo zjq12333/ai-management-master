@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Bot,
   LayoutDashboard,
   LogIn,
   Settings,
@@ -22,6 +23,7 @@ export const appNavItems: {
   { route: "loginRepair", icon: LogIn, labelKey: "nav.loginRepair" },
   { route: "enhancer", icon: Sparkles, labelKey: "nav.enhancer", fallbackLabel: "增强功能" },
   { route: "aiManagement", icon: Sparkles, labelKey: "nav.aiManagement" },
+  { route: "modelManagement", icon: Bot, labelKey: "nav.modelManagement" },
   { route: "maintenance", icon: Wrench, labelKey: "nav.maintenance" },
   { route: "settings", icon: Settings, labelKey: "nav.settings" },
 ];

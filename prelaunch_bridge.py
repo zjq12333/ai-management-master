@@ -303,8 +303,7 @@ def handle_launch(
         "report_dir": str(report_dir),
     }
     log_lines: list[str] = []
-    enhanced_reuse_launch = mode == "hybrid" and provider is None
-    should_restore_history = bool(restore_history) and mode != "official" and not enhanced_reuse_launch
+    should_restore_history = bool(restore_history) and mode != "official"
 
     try:
         takeover = {"ok": True, "skipped": True, "reason": "launch_preserves_existing_codex"}
@@ -357,26 +356,22 @@ def handle_launch(
                 )
             )
         else:
-            skip_reason = "enhanced_reuse_keeps_existing_chat_state"
-            if not enhanced_reuse_launch:
-                skip_reason = "launch_history_restore_disabled" if mode != "official" else "official_enhanced_launch_keeps_original_chat_state"
+            skip_reason = "launch_history_restore_disabled" if mode != "official" else "official_launch_keeps_original_chat_state"
             payload["repair"] = {
                 "ok": True,
                 "skipped": True,
                 "reason": skip_reason,
             }
-            if enhanced_reuse_launch:
-                log_lines.append("History restore skipped: enhanced reuse launch keeps existing chat state.")
-            elif mode != "official":
+            if mode != "official":
                 log_lines.append("History restore skipped: launch restore option is disabled.")
             else:
-                log_lines.append("History restore skipped: official enhanced launch keeps original chat state.")
+                log_lines.append("History restore skipped: official launch keeps original chat state.")
 
-        if mode == "official" or enhanced_reuse_launch:
+        if mode == "official":
             provider_config = current_provider_config_payload(codex_home, mode)
         else:
             if profile is None:
-                raise RuntimeError("Provider profile is required for API launch mode.")
+                profile = load_provider_profile_from_config(codex_home_path, mode)
             config = configure_provider_for_launch(codex_home_path, mode, profile=profile)
             provider_config = provider_config_payload(config)
         payload["provider_config"] = provider_config
@@ -388,18 +383,10 @@ def handle_launch(
             )
         )
 
-        if enhanced_reuse_launch:
-            compatibility = {
-                "ok": True,
-                "skipped": True,
-                "reason": "enhanced_reuse_skips_provider_compatibility_check",
-                "status": {"rows_needing_reconcile": 0},
-            }
-        else:
-            try:
-                compatibility = run_threadripper_compatibility_check(codex_home)
-            except Exception as exc:
-                compatibility = {"ok": False, "skipped": True, "reason": "status_exception", "error": str(exc)}
+        try:
+            compatibility = run_threadripper_compatibility_check(codex_home)
+        except Exception as exc:
+            compatibility = {"ok": False, "skipped": True, "reason": "status_exception", "error": str(exc)}
         payload["provider_compatibility"] = compatibility
         # Keep the legacy key so existing result cards and old reports remain readable.
         payload["sync"] = compatibility
@@ -412,11 +399,7 @@ def handle_launch(
             )
         )
 
-        launch = (
-            launch_codex_desktop_with_enhancer(codex_home_path, mode)
-            if mode in ("official", "hybrid") or enhancer_enabled(codex_home_path)
-            else launch_codex_desktop()
-        )
+        launch = launch_codex_desktop()
         payload["launch"] = launch
         payload["ok"] = bool(launch.get("ok"))
         if launch.get("ok"):

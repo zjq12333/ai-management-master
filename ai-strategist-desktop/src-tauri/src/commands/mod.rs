@@ -1,8 +1,9 @@
-pub mod custom_instructions;
 pub mod codex_plus;
 pub mod enhancer;
 pub mod hotspot;
 pub mod lac;
+pub mod model_gateway;
+pub mod model_relay;
 pub mod mcp;
 pub mod prelaunch;
 pub mod prelaunch_bridge;

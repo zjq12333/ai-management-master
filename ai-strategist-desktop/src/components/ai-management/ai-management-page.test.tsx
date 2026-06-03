@@ -2,14 +2,10 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import i18n from "@/lib/i18n";
 import { AIManagementPage } from "@/components/ai-management/ai-management-page";
 import { appNavItems } from "@/components/layout/sidebar";
+import i18n from "@/lib/i18n";
 import { ALL_APP_ROUTES } from "@/types/navigation";
-
-vi.mock("@/components/custom-instructions/custom-instructions-page", () => ({
-  CustomInstructionsPage: () => <div>Strategy template content</div>,
-}));
 
 vi.mock("@/components/mcp/mcp-page", () => ({
   McpPage: () => <div>MCP content</div>,
@@ -35,24 +31,23 @@ describe("AIManagementPage", () => {
       "loginRepair",
       "enhancer",
       "aiManagement",
+      "modelManagement",
       "maintenance",
       "settings",
     ]);
     expect(appNavItems.map((item) => item.labelKey)).toContain("nav.aiManagement");
   });
 
-  it("shows a second-level menu and renders selected third-level content", () => {
+  it("keeps launch and repair outside AI management", () => {
     render(<AIManagementPage />);
 
-    expect(screen.getByRole("heading", { name: "AI管理中心" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "策略模板" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "启动与修复" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "MCP 管理" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Skills 管理" })).toBeInTheDocument();
-    expect(screen.getByText("Strategy template content")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("tab", { name: "MCP 管理" }));
-
     expect(screen.getByText("MCP content")).toBeInTheDocument();
-    expect(screen.queryByText("Strategy template content")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Skills 管理" }));
+
+    expect(screen.getByText("Skills content")).toBeInTheDocument();
   });
 });

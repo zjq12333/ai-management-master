@@ -1,3 +1,4 @@
+use super::model_gateway::{config_path, read_config};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -159,7 +160,7 @@ pub fn load_provider_profile_from_config(
 }
 
 pub fn provider_json_for_launch(
-    codex_home: &str,
+    _codex_home: &str,
     mode: Option<&str>,
     provider_json: Option<&str>,
 ) -> Result<Option<String>, String> {
@@ -169,13 +170,44 @@ pub fn provider_json_for_launch(
     let Some(mode @ ("api" | "hybrid")) = mode else {
         return Ok(None);
     };
-    if mode == "hybrid" {
-        return Ok(None);
-    }
-    let profile = load_provider_profile_from_config(&normalize_codex_home(codex_home), mode)?;
+    let profile = load_model_bucket_provider(mode)?
+        .ok_or_else(|| "No enabled model bucket relay is configured for this launch mode.".to_string())?;
     serde_json::to_string(&profile)
         .map(Some)
         .map_err(|error| error.to_string())
+}
+
+fn load_model_bucket_provider(mode: &str) -> Result<Option<ProviderProfile>, String> {
+    let path = config_path()?;
+    if !path.exists() {
+        if mode == "hybrid" {
+            return Ok(None);
+        }
+        return Ok(None);
+    }
+
+    let config = read_config(&path)?;
+    if !config.relay.enabled {
+        return Ok(None);
+    }
+    if config.providers.iter().all(|provider| !provider.enabled) {
+        return Ok(None);
+    }
+
+    let token = config.relay.management_token.unwrap_or_default();
+    if mode == "hybrid" && token.trim().is_empty() {
+        return Err("Hybrid mode requires a model bucket relay token.".to_string());
+    }
+
+    Ok(Some(ProviderProfile {
+        key: "ai_strategist_model_bucket".to_string(),
+        name: "AI Strategist Model Bucket".to_string(),
+        base_url: format!("http://127.0.0.1:{}/v1", config.relay.port),
+        wire_api: "responses".to_string(),
+        env_key: String::new(),
+        requires_openai_auth: mode == "hybrid",
+        experimental_bearer_token: token,
+    }))
 }
 
 pub fn reusable_hybrid_provider_key(codex_home: &Path) -> Option<String> {
@@ -384,11 +416,21 @@ mod tests {
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
-    fn provider_json_for_hybrid_reuse_does_not_require_existing_token() {
-        let payload = provider_json_for_launch(r"%USERPROFILE%\.codex", Some("hybrid"), None)
-            .expect("hybrid reuse should not validate provider before bridge launch");
+    fn provider_json_for_hybrid_requires_model_bucket() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var_os("AI_STRATEGIST_MODEL_GATEWAY_CONFIG");
+        std::env::set_var("AI_STRATEGIST_MODEL_GATEWAY_CONFIG", r"C:\missing\model-gateway.json");
 
-        assert_eq!(payload, None);
+        let result = provider_json_for_launch(r"%USERPROFILE%\.codex", Some("hybrid"), None);
+
+        match previous {
+            Some(value) => std::env::set_var("AI_STRATEGIST_MODEL_GATEWAY_CONFIG", value),
+            None => std::env::remove_var("AI_STRATEGIST_MODEL_GATEWAY_CONFIG"),
+        }
+        assert_eq!(
+            result.expect_err("hybrid launch should require the model bucket"),
+            "No enabled model bucket relay is configured for this launch mode."
+        );
     }
 
     #[test]

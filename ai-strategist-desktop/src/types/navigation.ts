@@ -3,6 +3,7 @@ export type Route =
   | "loginRepair"
   | "enhancer"
   | "aiManagement"
+  | "modelManagement"
   | "maintenance"
   | "settings";
 
@@ -11,6 +12,7 @@ export const ALL_APP_ROUTES: Route[] = [
   "loginRepair",
   "enhancer",
   "aiManagement",
+  "modelManagement",
   "maintenance",
   "settings",
 ];

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
 pub fn repo_root_from_manifest() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -26,10 +27,9 @@ pub fn bridge_program_path() -> Option<PathBuf> {
     })
 }
 
-pub fn bridge_script_path() -> PathBuf {
+pub fn bridge_script_path() -> Option<PathBuf> {
     bridge_program_path()
         .filter(|path| !is_windows_executable(path))
-        .unwrap_or_else(|| repo_root_from_manifest().join("prelaunch_bridge.py"))
 }
 
 pub fn bridge_exe_path() -> Option<PathBuf> {
@@ -70,14 +70,20 @@ pub fn bundled_bridge_candidates() -> Vec<PathBuf> {
     candidates
 }
 
-fn bridge_command_prefix() -> Vec<String> {
+fn bridge_command_prefix() -> Result<Vec<String>, String> {
     if let Some(path) = bridge_exe_path() {
-        return vec![path.display().to_string()];
+        return Ok(vec![path.display().to_string()]);
     }
-    vec![
+    let Some(script_path) = bridge_script_path() else {
+        return Err(
+            "prelaunch_bridge_missing: could not find bundled prelaunch_bridge.exe or prelaunch_bridge.py"
+                .to_string(),
+        );
+    };
+    Ok(vec![
         python_command(),
-        bridge_script_path().display().to_string(),
-    ]
+        script_path.display().to_string(),
+    ])
 }
 
 pub fn python_command() -> String {
@@ -87,7 +93,7 @@ pub fn python_command() -> String {
         .to_string()
 }
 
-pub fn bridge_command(subcommand: &str, codex_home: &str) -> Vec<String> {
+pub fn bridge_command(subcommand: &str, codex_home: &str) -> Result<Vec<String>, String> {
     bridge_command_with_mode(subcommand, codex_home, None, None, false, false)
 }
 
@@ -130,8 +136,8 @@ pub fn bridge_command_with_mode(
     provider_json: Option<&str>,
     hide_official_quota_notice: bool,
     restore_history: bool,
-) -> Vec<String> {
-    let mut command = bridge_command_prefix();
+) -> Result<Vec<String>, String> {
+    let mut command = bridge_command_prefix()?;
     command.extend([
         subcommand.to_string(),
         "--codex-home".to_string(),
@@ -151,15 +157,15 @@ pub fn bridge_command_with_mode(
     if restore_history {
         command.push("--restore-history".to_string());
     }
-    command
+    Ok(command)
 }
 
 pub fn bridge_command_with_recovery_options(
     subcommand: &str,
     codex_home: &str,
     options: RecoveryOptions<'_>,
-) -> Vec<String> {
-    let mut command = bridge_command(subcommand, codex_home);
+) -> Result<Vec<String>, String> {
+    let mut command = bridge_command(subcommand, codex_home)?;
     append_recovery_options(&mut command, options);
-    command
+    Ok(command)
 }

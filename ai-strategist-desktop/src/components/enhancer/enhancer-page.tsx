@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellOff, FolderSync, PackageCheck, Send } from "lucide-react";
+import { BellOff, FolderSync, Send } from "lucide-react";
 
 import { BentoCard } from "@/components/ui/bento-card";
 import { Switch } from "@/components/ui/switch";
@@ -44,15 +44,6 @@ const featureCards: EnhancerFeatureCard[] = [
     accentClassName: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
     save: (enabled) => api.setHideOfficialQuotaNoticeEnabled(enabled),
   },
-  {
-    key: "mustInstallPluginsEnabled",
-    title: "必须装",
-    description: "开启后，Codex 插件页里被前端标成不可用的安装按钮会被重新启用，按钮文案显示为必须装。",
-    detail: "只解除页面按钮禁用；如果远端仍拒绝插件安装，结果会按 Codex 返回为准。",
-    icon: PackageCheck,
-    accentClassName: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-    save: (enabled) => api.setMustInstallPluginsEnabled(enabled),
-  },
 ];
 
 export function EnhancerPage() {
@@ -73,7 +64,6 @@ export function EnhancerPage() {
     chatInfoMoveEnabled: false,
     oneClickHandoffEnabled: false,
     hideOfficialQuotaNoticeEnabled: false,
-    mustInstallPluginsEnabled: false,
   };
 
   return (

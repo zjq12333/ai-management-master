@@ -126,8 +126,6 @@ pub struct EnhancerConfig {
     pub one_click_handoff_enabled: bool,
     #[serde(default)]
     pub hide_official_quota_notice_enabled: bool,
-    #[serde(default)]
-    pub must_install_plugins_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1363,7 +1361,6 @@ impl Repository {
             chat_info_move_enabled: settings.enhancer.chat_info_move_enabled,
             one_click_handoff_enabled: settings.enhancer.one_click_handoff_enabled,
             hide_official_quota_notice_enabled: settings.enhancer.hide_official_quota_notice_enabled,
-            must_install_plugins_enabled: settings.enhancer.must_install_plugins_enabled,
         }
     }
 
@@ -1372,7 +1369,6 @@ impl Repository {
             chat_info_move_enabled: settings.enhancer.chat_info_move_enabled,
             one_click_handoff_enabled: settings.enhancer.one_click_handoff_enabled,
             hide_official_quota_notice_enabled: settings.enhancer.hide_official_quota_notice_enabled,
-            must_install_plugins_enabled: settings.enhancer.must_install_plugins_enabled,
         }
     }
 
@@ -1402,16 +1398,6 @@ impl Repository {
     ) -> Result<EnhancerSettingsPayload, CoreError> {
         let mut settings = self.load_settings();
         settings.enhancer.hide_official_quota_notice_enabled = enabled;
-        self.save_settings(&settings)?;
-        Ok(Self::enhancer_settings_payload(&settings))
-    }
-
-    pub fn set_must_install_plugins_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<EnhancerSettingsPayload, CoreError> {
-        let mut settings = self.load_settings();
-        settings.enhancer.must_install_plugins_enabled = enabled;
         self.save_settings(&settings)?;
         Ok(Self::enhancer_settings_payload(&settings))
     }
@@ -1649,7 +1635,6 @@ mod tests {
         assert!(payload.one_click_handoff_enabled);
         assert!(!payload.chat_info_move_enabled);
         assert!(!payload.hide_official_quota_notice_enabled);
-        assert!(!payload.must_install_plugins_enabled);
 
         let settings = repo.load_settings();
         assert!(settings.enhancer.one_click_handoff_enabled);
@@ -1666,7 +1651,6 @@ mod tests {
         assert!(payload.hide_official_quota_notice_enabled);
         assert!(!payload.chat_info_move_enabled);
         assert!(!payload.one_click_handoff_enabled);
-        assert!(!payload.must_install_plugins_enabled);
 
         let settings = repo.load_settings();
         assert!(settings.enhancer.hide_official_quota_notice_enabled);
@@ -1675,21 +1659,5 @@ mod tests {
         let _ = fs::remove_dir_all(codex_home);
     }
 
-    #[test]
-    fn set_must_install_plugins_enabled_persists_to_settings() {
-        let (repo, codex_home) = make_test_repo("enhancer-must-install");
-
-        let payload = repo.set_must_install_plugins_enabled(true).unwrap();
-        assert!(payload.must_install_plugins_enabled);
-        assert!(!payload.chat_info_move_enabled);
-        assert!(!payload.one_click_handoff_enabled);
-        assert!(!payload.hide_official_quota_notice_enabled);
-
-        let settings = repo.load_settings();
-        assert!(settings.enhancer.must_install_plugins_enabled);
-        assert!(repo.get_enhancer_settings().must_install_plugins_enabled);
-
-        let _ = fs::remove_dir_all(codex_home);
-    }
 }
 

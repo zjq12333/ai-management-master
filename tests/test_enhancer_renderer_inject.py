@@ -30,33 +30,3 @@ def test_enhancer_renderer_script_copies_handoff_prompt_when_takeover_fails():
     assert "自动打开新对话失败" in text
     assert "已复制接管提示" in text
     assert "await copyTextToClipboard(prompt)" in text
-
-
-def test_enhancer_renderer_script_contains_must_install_plugin_unlock():
-    text = Path("enhancer_renderer_inject.js").read_text(encoding="utf-8")
-    start = text.index("function pluginInstallCandidates")
-    end = text.index("function escapeHtml", start)
-    plugin_unlock_code = text[start:end]
-    assert "mustInstallPluginsEnabled" in text
-    assert "function pluginEntryButton" in plugin_unlock_code
-    assert "function enablePluginEntry" in plugin_unlock_code
-    assert "spoofChatGPTAuthMethod(pluginButton)" in plugin_unlock_code
-    assert "data-ai-strategist-plugin-enabled" not in plugin_unlock_code
-    assert "aiStrategistPluginEnabled" in plugin_unlock_code
-    assert "unlockMustInstallPluginButtons" in plugin_unlock_code
-    assert "button:disabled\"," in plugin_unlock_code
-    assert "button:disabled.w-full.justify-center" in plugin_unlock_code
-    assert "button[aria-disabled='true']" in plugin_unlock_code
-    assert "button[data-disabled]" in plugin_unlock_code
-    assert "[role='button'][data-disabled]" in plugin_unlock_code
-    assert "button.pointer-events-none" in plugin_unlock_code
-    assert "[role='button'][aria-disabled='true'].cursor-not-allowed" in plugin_unlock_code
-    assert "removeAttribute(\"data-disabled\")" in plugin_unlock_code
-    assert "app unavailable" in plugin_unlock_code
-    assert "应用不可用" in plugin_unlock_code
-    assert "document.body.textContent" not in plugin_unlock_code
-    assert "button.disabled = false" in plugin_unlock_code
-    assert "removeAttribute(\"aria-disabled\")" in plugin_unlock_code
-    assert "spoofChatGPTAuthMethod(document.body)" in plugin_unlock_code
-    assert "必须装" in plugin_unlock_code
-    assert "unlockMustInstallPluginButtons();" in text[text.index("function scan") :]

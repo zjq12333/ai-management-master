@@ -69,10 +69,6 @@ class EnhancerRuntimeTests(unittest.TestCase):
 
             with mock.patch.object(
                 enhancer_runtime,
-                "ensure_must_install_local_plugins",
-                return_value={"enabled": False, "changed": False, "plugins": [], "available_plugins": [], "errors": []},
-            ), mock.patch.object(
-                enhancer_runtime,
                 "configure_provider_for_launch",
                 side_effect=AssertionError("existing-session launch must not override provider"),
             ), mock.patch.object(
@@ -124,73 +120,6 @@ class EnhancerRuntimeTests(unittest.TestCase):
             self.assertEqual(thread_cls.call_count, 1)
             self.assertIn("runtime takeover watcher disabled", log_file.read_text(encoding="utf-8"))
 
-    def test_runtime_enables_must_install_plugins_before_launch(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            codex_home = Path(tmp) / ".codex"
-            codex_home.mkdir()
-            status_file = Path(tmp) / "runtime-status.json"
-            log_file = Path(tmp) / "runtime.log"
-            plugin_payload = {
-                "enabled": True,
-                "changed": True,
-                "plugins": ["browser@openai-bundled"],
-                "available_plugins": ["browser@openai-bundled"],
-                "errors": [],
-            }
-            with mock.patch.object(
-                enhancer_runtime,
-                "ensure_must_install_local_plugins",
-                return_value=plugin_payload,
-            ) as ensure_plugins, mock.patch.object(
-                enhancer_runtime,
-                "launch_codex_desktop_with_retry",
-                return_value={"ok": True, "method": "product_resolved_exe", "debug_port": 49152},
-            ), mock.patch.object(
-                enhancer_runtime,
-                "existing_codex_debug_port",
-                return_value=None,
-            ), mock.patch.object(
-                enhancer_runtime,
-                "wait_before_attach",
-            ), mock.patch.object(
-                enhancer_runtime,
-                "attach_to_codex",
-                return_value=([], set()),
-            ), mock.patch.object(
-                enhancer_runtime.threading,
-                "Thread",
-            ) as thread_cls, mock.patch.object(
-                enhancer_runtime,
-                "codex_running_processes",
-                return_value=[],
-            ), mock.patch.object(
-                enhancer_runtime.time,
-                "sleep",
-            ), mock.patch.object(
-                sys,
-                "argv",
-                [
-                    "enhancer_runtime.py",
-                    "--codex-home",
-                    str(codex_home),
-                    "--status-file",
-                    str(status_file),
-                    "--log-file",
-                    str(log_file),
-                    "--launch-mode",
-                    "hybrid",
-                ],
-            ):
-                exit_code = enhancer_runtime.main()
-
-            status = json.loads(status_file.read_text(encoding="utf-8"))
-            ensure_plugins.assert_called_once_with(codex_home)
-            self.assertEqual(exit_code, 0, status)
-            self.assertTrue(status["ok"])
-            self.assertEqual(status["must_install_plugins"], plugin_payload)
-            self.assertIn("must-install plugins", log_file.read_text(encoding="utf-8"))
-            self.assertEqual(thread_cls.call_count, 1)
-            self.assertIn("runtime takeover watcher disabled", log_file.read_text(encoding="utf-8"))
 
     def test_runtime_reuses_existing_cdp_without_desktop_activation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -200,10 +129,6 @@ class EnhancerRuntimeTests(unittest.TestCase):
             log_file = Path(tmp) / "runtime.log"
 
             with mock.patch.object(
-                enhancer_runtime,
-                "ensure_must_install_local_plugins",
-                return_value={"enabled": False, "changed": False, "plugins": [], "available_plugins": [], "errors": []},
-            ), mock.patch.object(
                 enhancer_runtime,
                 "desktop_codex_running_processes",
                 return_value=[
@@ -269,10 +194,6 @@ class EnhancerRuntimeTests(unittest.TestCase):
             log_file = Path(tmp) / "runtime.log"
 
             with mock.patch.object(
-                enhancer_runtime,
-                "ensure_must_install_local_plugins",
-                return_value={"enabled": False, "changed": False, "plugins": [], "available_plugins": [], "errors": []},
-            ), mock.patch.object(
                 enhancer_runtime,
                 "launch_codex_desktop_with_retry",
                 return_value={"ok": True, "method": "product_resolved_exe", "debug_port": 49152},
