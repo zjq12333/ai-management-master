@@ -1,6 +1,6 @@
 [package]
 name = "ai-strategist"
-version = "1.0.0"
+version = "1.0.1"
 default-run = "AI-Strategist"
 description = "AI Strategist for Codex - local launch and repair desktop shell"
 authors = ["borawong"]
