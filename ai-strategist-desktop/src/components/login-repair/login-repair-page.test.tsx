@@ -276,11 +276,11 @@ function clickEnhancedLaunch() {
 }
 
 function clickRepair() {
-  fireEvent.click(screen.getByRole("button", { name: "修复历史" }));
+  fireEvent.click(screen.getByRole("button", { name: "安全恢复聊天" }));
 }
 
 function openAdvancedRecoveryOptions() {
-  fireEvent.click(screen.getByRole("button", { name: "显示高级恢复选项" }));
+  fireEvent.click(screen.getByRole("button", { name: "显示安全恢复选项" }));
 }
 
 describe("LoginRepairPage", () => {
@@ -328,14 +328,14 @@ describe("LoginRepairPage", () => {
     expect(screen.queryByText("隐藏 Codex 官方额度提醒")).not.toBeInTheDocument();
 
     const firstAction = screen.getByText("本地模型桶启动").closest(".rounded-2xl");
-    const repairCard = screen.getByText("历史恢复").closest(".rounded-2xl");
+    const repairCard = screen.getByText("安全历史恢复").closest(".rounded-2xl");
     const firstStatus = screen.getByText("登录态").closest(".rounded-2xl");
 
     expect(screen.getByText("本地模型桶启动")).toBeInTheDocument();
     expect(screen.getByText("混合登录启动")).toBeInTheDocument();
     expect(screen.getByText("增强启动")).toBeInTheDocument();
     expect(screen.getByText("启动已登录的 Codex，并加载插件和增强功能。")).toBeInTheDocument();
-    expect(screen.getByText("历史恢复")).toBeInTheDocument();
+    expect(screen.getByText("安全历史恢复")).toBeInTheDocument();
     expect(firstAction?.compareDocumentPosition(firstStatus as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(firstAction?.compareDocumentPosition(repairCard as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
@@ -555,7 +555,15 @@ describe("LoginRepairPage", () => {
 
     expect(await screen.findByText("D:/repo/reports/20260522-123456-修复恢复-repair")).toBeInTheDocument();
     expect(screen.getByText("53")).toBeInTheDocument();
-    expect(prelaunchRepairMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME);
+    expect(prelaunchRepairMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, {
+      includeArchived: true,
+      allowMissingCwd: true,
+      allowEmptyCwd: true,
+      allowMissingSession: false,
+      projectlessMode: "none",
+      unarchiveSelected: true,
+      historyRoot: "%USERPROFILE%\\Documents\\Codex",
+    });
   });
 
   it("forwards advanced recovery options when running repair", async () => {
@@ -564,21 +572,21 @@ describe("LoginRepairPage", () => {
     await screen.findByText("chatgpt");
     openAdvancedRecoveryOptions();
     fireEvent.click(screen.getByRole("switch", { name: "包含归档聊天" }));
-    fireEvent.click(screen.getByRole("switch", { name: "允许缺失 cwd" }));
-    fireEvent.click(screen.getByRole("switch", { name: "允许空 workspace" }));
+    fireEvent.click(screen.getByRole("switch", { name: "纳入缺失 workspace" }));
+    fireEvent.click(screen.getByRole("switch", { name: "纳入空 workspace" }));
     fireEvent.click(screen.getByRole("switch", { name: "允许缺失 session" }));
     fireEvent.click(screen.getByRole("switch", { name: "恢复到 projectless" }));
-    fireEvent.click(screen.getByRole("switch", { name: "取消归档选中聊天" }));
     clickRepair();
 
     expect(await screen.findByText("D:/repo/reports/20260522-123456-修复恢复-repair")).toBeInTheDocument();
     expect(prelaunchRepairMock).toHaveBeenCalledWith(DEFAULT_CODEX_HOME, {
-      includeArchived: true,
-      allowMissingCwd: true,
-      allowEmptyCwd: true,
+      includeArchived: false,
+      allowMissingCwd: false,
+      allowEmptyCwd: false,
       allowMissingSession: true,
       projectlessMode: "all",
-      unarchiveSelected: true,
+      unarchiveSelected: false,
+      historyRoot: "%USERPROFILE%\\Documents\\Codex",
     });
   });
 
@@ -595,7 +603,7 @@ describe("LoginRepairPage", () => {
   it("does not place login and repair actions inside the dashboard", () => {
     render(<OverviewPage />);
 
-    expect(screen.queryByRole("button", { name: /配置并启动|修复历史|进入登录与修复/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /配置并启动|安全恢复聊天|进入登录与修复/ })).not.toBeInTheDocument();
     expect(screen.queryByText("官方账号启动")).not.toBeInTheDocument();
     expect(screen.queryByText("本地模型桶启动")).not.toBeInTheDocument();
     expect(screen.queryByText("混合登录")).not.toBeInTheDocument();

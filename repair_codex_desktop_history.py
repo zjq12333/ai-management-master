@@ -47,6 +47,47 @@ def dir_nonempty(value: str | None) -> bool:
         return False
 
 
+def canonical_path_key(value: str | None) -> str | None:
+    clean = clean_path(value)
+    if not clean:
+        return None
+    return clean.rstrip("\\/").casefold()
+
+
+def default_history_root() -> str:
+    return str(Path.home() / "Documents" / "Codex")
+
+
+def safe_history_root(value: str | None) -> str:
+    clean = clean_path(value) or default_history_root()
+    path = normalize_path(clean)
+    if path.exists() and path.is_dir():
+        return str(path)
+    fallback = Path.home()
+    return str(fallback)
+
+
+def normalized_workspace_path(value: str | None, history_root: str | None) -> tuple[str | None, str]:
+    clean = clean_path(value)
+    if clean and dir_nonempty(clean):
+        return clean, "kept"
+    if clean and path_exists(clean):
+        return safe_history_root(history_root), "empty-to-history-root"
+    return safe_history_root(history_root), "missing-to-history-root"
+
+
+def append_unique_path(paths: list[str], value: str | None) -> bool:
+    clean = clean_path(value)
+    key = canonical_path_key(clean)
+    if not clean or not key:
+        return False
+    existing = {canonical_path_key(path) for path in paths}
+    if key in existing:
+        return False
+    paths.append(clean)
+    return True
+
+
 def preview_text(value: str | None, limit: int = 160) -> str | None:
     if value is None:
         return None
@@ -334,6 +375,58 @@ def sync_selected_provider(db_path: Path, selected: list[dict[str, Any]], target
         "provider_synced": provider_synced,
         "provider_rollouts_synced": rollout_updates,
         "provider_rollout_errors": rollout_errors[:20],
+    }
+
+
+def normalize_selected_workspaces(db_path: Path, selected: list[dict[str, Any]], history_root: str | None) -> dict[str, Any]:
+    updates: list[tuple[str, str]] = []
+    rollout_updates = 0
+    rollout_errors: list[dict[str, Any]] = []
+    reasons = Counter()
+
+    for thread in selected:
+        thread_id = thread.get("id")
+        if not thread_id:
+            continue
+        target_cwd, reason = normalized_workspace_path(thread.get("cwd"), history_root)
+        if not target_cwd:
+            continue
+        reasons[reason] += 1
+        if thread.get("cwd") != target_cwd:
+            updates.append((thread_id, target_cwd))
+            thread["cwd"] = target_cwd
+        rollout_result = update_rollout_session_meta_cwd(thread.get("rollout_path"), thread_id, target_cwd)
+        if rollout_result.get("updated"):
+            rollout_updates += 1
+        elif rollout_result.get("error"):
+            rollout_errors.append({"id": thread_id, "error": rollout_result.get("error")})
+
+    if updates:
+        con = sqlite3.connect(db_path)
+        try:
+            try:
+                con.executemany("update threads set cwd = ? where id = ?", [(cwd, thread_id) for thread_id, cwd in updates])
+            except sqlite3.OperationalError as exc:
+                return {
+                    "workspace_cwd_synced": 0,
+                    "workspace_rollouts_synced": rollout_updates,
+                    "workspace_rollout_errors": rollout_errors[:20],
+                    "workspace_normalization_reasons": dict(reasons),
+                    "workspace_sync_error": str(exc),
+                }
+            con.commit()
+            try:
+                con.execute("pragma wal_checkpoint(TRUNCATE)")
+            except sqlite3.OperationalError:
+                pass
+        finally:
+            con.close()
+
+    return {
+        "workspace_cwd_synced": len(updates),
+        "workspace_rollouts_synced": rollout_updates,
+        "workspace_rollout_errors": rollout_errors[:20],
+        "workspace_normalization_reasons": dict(reasons),
     }
 
 
@@ -738,19 +831,31 @@ def unarchive_selected_threads(db_path: Path, thread_ids: list[str]) -> int:
         con.close()
 
 
-def repair_state(state_path: Path, threads: list[dict[str, Any]], current_thread_id: str | None, projectless_mode: str) -> dict[str, Any]:
+def repair_state(
+    state_path: Path,
+    threads: list[dict[str, Any]],
+    current_thread_id: str | None,
+    projectless_mode: str,
+    history_root: str | None = None,
+) -> dict[str, Any]:
     state = json.loads(state_path.read_text(encoding="utf-8"))
     thread_ids = [thread["id"] for thread in threads]
     hints: dict[str, str] = {}
     roots: list[str] = []
+    normalized_to_history_root = 0
+    stripped_extended_paths = 0
 
     for thread in threads:
-        cwd = clean_path(thread.get("cwd"))
+        original_cwd = thread.get("cwd")
+        cwd, reason = normalized_workspace_path(original_cwd, history_root)
         if not cwd:
             continue
+        if reason != "kept":
+            normalized_to_history_root += 1
+        if clean_path(original_cwd) != original_cwd:
+            stripped_extended_paths += 1
         hints[thread["id"]] = cwd
-        if cwd not in roots:
-            roots.append(cwd)
+        append_unique_path(roots, cwd)
 
     if projectless_mode == "current-only" and current_thread_id in thread_ids:
         state["projectless-thread-ids"] = [current_thread_id]
@@ -759,9 +864,14 @@ def repair_state(state_path: Path, threads: list[dict[str, Any]], current_thread
     else:
         state["projectless-thread-ids"] = []
 
+    saved_roots: list[str] = []
+    for root in list(state.get("electron-saved-workspace-roots") or []) + roots:
+        normalized, _ = normalized_workspace_path(root, history_root)
+        append_unique_path(saved_roots, normalized)
+
     state["thread-workspace-root-hints"] = hints
-    state["electron-saved-workspace-roots"] = roots
-    state["project-order"] = roots
+    state["electron-saved-workspace-roots"] = saved_roots
+    state["project-order"] = list(saved_roots)
     # Threads are selected in updated_at desc order; opening the newest restored
     # workspace makes Desktop surface the chat the user just restored.
     state["active-workspace-roots"] = roots[:1]
@@ -776,9 +886,11 @@ def repair_state(state_path: Path, threads: list[dict[str, Any]], current_thread
     state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {
         "thread_hints": len(hints),
-        "saved_workspace_roots": len(roots),
+        "saved_workspace_roots": len(saved_roots),
         "active_workspace_roots": state["active-workspace-roots"],
         "projectless_thread_ids": len(state.get("projectless-thread-ids") or []),
+        "workspace_normalized_to_history_root": normalized_to_history_root,
+        "workspace_extended_paths_stripped": stripped_extended_paths,
     }
 
 
@@ -810,6 +922,7 @@ def main() -> int:
     parser.add_argument("--codex-home", default=str(Path.home() / ".codex"))
     parser.add_argument("--current-thread-id")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--history-root", default=default_history_root(), help="Existing workspace root used for missing or empty cwd values.")
     parser.add_argument("--include-archived", action="store_true", help="Also restore archived conversations.")
     parser.add_argument("--allow-missing-cwd", action="store_true", help="Show conversations whose cwd no longer exists.")
     parser.add_argument("--allow-empty-cwd", action="store_true", help="Show conversations whose cwd exists but is empty.")
@@ -827,6 +940,8 @@ def main() -> int:
 
     codex_home = normalize_path(args.codex_home)
     db_path = codex_home / "state_5.sqlite"
+    if not db_path.exists() and (codex_home / "sqlite" / "state_5.sqlite").exists():
+        db_path = codex_home / "sqlite" / "state_5.sqlite"
     state_path = codex_home / ".codex-global-state.json"
     index_path = codex_home / "session_index.jsonl"
 
@@ -839,6 +954,7 @@ def main() -> int:
     result = build_result(codex_home, threads, selected, skipped, args.dry_run)
     target_provider = args.target_provider or read_current_provider(codex_home)
     result["target_provider"] = target_provider
+    result["history_root"] = safe_history_root(args.history_root)
 
     if args.dry_run:
         result["thread_attributions"] = thread_attributions(threads, args)
@@ -861,7 +977,8 @@ def main() -> int:
     else:
         result["unarchived"] = 0
 
-    result.update(repair_state(state_path, selected, args.current_thread_id, args.projectless_mode))
+    result.update(normalize_selected_workspaces(db_path, selected, args.history_root))
+    result.update(repair_state(state_path, selected, args.current_thread_id, args.projectless_mode, args.history_root))
     if args.sync_provider:
         if not target_provider:
             result["provider_sync_error"] = "target_provider_missing"

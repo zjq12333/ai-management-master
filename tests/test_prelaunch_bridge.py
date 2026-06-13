@@ -63,7 +63,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertFalse(payload["codex_running"])
-        self.assertEqual(payload["desktop_launch"]["method"], "product_resolved_exe")
+        self.assertEqual(payload["desktop_launch"]["method"], "appid")
         self.assertEqual(payload["desktop_launch"]["product_resolved_source"], "installedLocal")
         self.assertEqual(payload["desktop_launch"]["appid"], "OpenAI.Codex_abc!App")
 
@@ -182,7 +182,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
         self.assertEqual(payload["visible_pid"], 1001)
         popen.assert_called_once()
 
-    def test_launch_codex_desktop_treats_appid_pid_as_started_even_when_focus_fails(self):
+    def test_launch_codex_desktop_requires_visible_appid_window_when_focus_fails(self):
         with mock.patch.object(prelaunch_manager.subprocess, "Popen") as popen, mock.patch.object(
             prelaunch_manager,
             "focus_codex_window",
@@ -215,10 +215,11 @@ class PrelaunchBridgeTests(unittest.TestCase):
             popen.return_value.pid = 1001
             payload = prelaunch_manager.launch_codex_desktop()
 
-        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["ok"])
         self.assertEqual(payload["method"], "appid")
         self.assertEqual(payload["pid"], 1001)
-        self.assertIsNone(payload["error"])
+        self.assertIsNone(payload["visible_pid"])
+        self.assertIn("visible window", payload["error"])
 
     def test_launch_codex_desktop_focuses_existing_visible_window(self):
         running = [{"pid": 4242, "image": "Codex.exe", "exe": "C:/Program Files/WindowsApps/OpenAI.Codex/app/Codex.exe"}]
@@ -461,7 +462,10 @@ class PrelaunchBridgeTests(unittest.TestCase):
         activation_args = activate.call_args.args[1]
         self.assertRegex(activation_args, r"--remote-debugging-port=\d+")
         launched_port = int(re.search(r"--remote-debugging-port=(\d+)", activation_args).group(1))
-        wait_for_cdp.assert_called_once_with(launched_port)
+        wait_for_cdp.assert_called_once_with(
+            launched_port,
+            timeout_seconds=prelaunch_manager.CDP_WAIT_TIMEOUT_SECONDS,
+        )
         focus.assert_called_once_with(2468)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["method"], "product_resolved_packaged_activation")
@@ -644,7 +648,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
     def test_launch_codex_desktop_with_retry_retries_after_cdp_failure(self):
         attempts: list[int] = []
 
-        def fake_launch(args, debug_port):
+        def fake_launch(args, debug_port, **_kwargs):
             attempts.append(len(attempts) + 1)
             if len(attempts) == 1:
                 return {
@@ -1033,6 +1037,10 @@ class PrelaunchBridgeTests(unittest.TestCase):
             prelaunch_bridge,
             "launch_codex_desktop",
             side_effect=lambda: calls.append("launch") or launch_payload,
+        ), mock.patch.object(
+            prelaunch_bridge.prelaunch_manager,
+            "enhancer_enabled",
+            return_value=False,
         ), mock.patch.object(
             prelaunch_bridge,
             "launch_codex_desktop_with_enhancer",
@@ -1714,6 +1722,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
             allow_empty_cwd=False,
             allow_missing_session=False,
             unarchive_selected=False,
+            history_root=None,
         )
         self.assertEqual(stdout.getvalue().strip(), '{"ok": true, "launch": {"method": "appid"}}')
 
@@ -1757,6 +1766,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
             allow_empty_cwd=False,
             allow_missing_session=False,
             unarchive_selected=False,
+            history_root=None,
         )
 
     def test_main_launch_command_returns_nonzero_for_failed_payload(self):
@@ -1858,11 +1868,16 @@ class PrelaunchBridgeTests(unittest.TestCase):
                 return_value=repaired_state,
             ) as repair_state, mock.patch.object(
                 prelaunch_bridge.history_repair,
+                "normalize_selected_workspaces",
+                return_value={"workspace_cwd_synced": 1},
+            ) as normalize_selected_workspaces, mock.patch.object(
+                prelaunch_bridge.history_repair,
                 "thread_attributions",
                 return_value=attributions,
             ) as thread_attributions, mock.patch.object(
                 prelaunch_bridge.history_repair,
                 "unarchive_selected_threads",
+                return_value=1,
             ) as unarchive_selected_threads:
                 payload = prelaunch_bridge.run_history_repair(str(codex_home), "none")
 
@@ -1873,9 +1888,20 @@ class PrelaunchBridgeTests(unittest.TestCase):
         read_jsonl.assert_called_once_with(codex_home / "session_index.jsonl")
         make_index_rows.assert_called_once_with([{"id": "existing"}], selected)
         write_jsonl.assert_called_once_with(codex_home / "session_index.jsonl", merged_rows)
-        repair_state.assert_called_once_with(codex_home / ".codex-global-state.json", selected, None, "none")
+        normalize_selected_workspaces.assert_called_once_with(
+            codex_home / "state_5.sqlite",
+            selected,
+            prelaunch_bridge.history_repair.default_history_root(),
+        )
+        repair_state.assert_called_once_with(
+            codex_home / ".codex-global-state.json",
+            selected,
+            None,
+            "none",
+            prelaunch_bridge.history_repair.default_history_root(),
+        )
         thread_attributions.assert_called_once()
-        unarchive_selected_threads.assert_not_called()
+        unarchive_selected_threads.assert_called_once_with(codex_home / "state_5.sqlite", ["t1"])
         self.assertEqual(
             payload,
             {
@@ -1886,7 +1912,11 @@ class PrelaunchBridgeTests(unittest.TestCase):
                     "thread_attributions": attributions,
                     "backup_dir": str(backup_dir),
                     "session_index_rows": 1,
-                    "unarchived": 0,
+                    "unarchived": 1,
+                    "history_root": prelaunch_bridge.history_repair.safe_history_root(
+                        prelaunch_bridge.history_repair.default_history_root()
+                    ),
+                    "workspace_cwd_synced": 1,
                     "thread_hints": 1,
                     "saved_workspace_roots": 1,
                 },
@@ -2108,6 +2138,7 @@ class PrelaunchBridgeTests(unittest.TestCase):
             allow_empty_cwd=True,
             allow_missing_session=True,
             unarchive_selected=True,
+            history_root=None,
         )
 
     def test_handle_launch_does_not_block_when_provider_compatibility_check_fails(self):
@@ -2130,6 +2161,10 @@ class PrelaunchBridgeTests(unittest.TestCase):
             prelaunch_bridge,
             "run_threadripper_compatibility_check",
             return_value=compatibility_payload,
+        ), mock.patch.object(
+            prelaunch_bridge.prelaunch_manager,
+            "enhancer_enabled",
+            return_value=True,
         ), mock.patch.object(
             prelaunch_bridge,
             "launch_codex_desktop_with_enhancer",

@@ -105,6 +105,7 @@ pub struct RecoveryOptions<'a> {
     pub allow_missing_session: bool,
     pub projectless_mode: Option<&'a str>,
     pub unarchive_selected: bool,
+    pub history_root: Option<&'a str>,
 }
 
 fn append_recovery_options(command: &mut Vec<String>, options: RecoveryOptions<'_>) {
@@ -126,6 +127,10 @@ fn append_recovery_options(command: &mut Vec<String>, options: RecoveryOptions<'
     }
     if options.unarchive_selected {
         command.push("--unarchive-selected".to_string());
+    }
+    if let Some(history_root) = options.history_root {
+        command.push("--history-root".to_string());
+        command.push(history_root.to_string());
     }
 }
 

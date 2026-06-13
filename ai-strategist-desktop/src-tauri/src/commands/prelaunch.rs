@@ -133,6 +133,7 @@ fn run_bridge_repair(
     allow_missing_session: bool,
     projectless_mode: Option<&str>,
     unarchive_selected: bool,
+    history_root: Option<&str>,
 ) -> Result<Value, String> {
     let command = bridge_command_with_recovery_options(
         "repair",
@@ -144,6 +145,7 @@ fn run_bridge_repair(
             allow_missing_session,
             projectless_mode,
             unarchive_selected,
+            history_root,
         },
     )?;
     run_bridge_command(command)
@@ -724,15 +726,17 @@ pub fn prelaunch_repair(
     allow_missing_session: Option<bool>,
     projectless_mode: Option<String>,
     unarchive_selected: Option<bool>,
+    history_root: Option<String>,
 ) -> Result<Value, String> {
     run_bridge_repair(
         &codex_home,
-        include_archived.unwrap_or(false),
-        allow_missing_cwd.unwrap_or(false),
-        allow_empty_cwd.unwrap_or(false),
+        include_archived.unwrap_or(true),
+        allow_missing_cwd.unwrap_or(true),
+        allow_empty_cwd.unwrap_or(true),
         allow_missing_session.unwrap_or(false),
         projectless_mode.as_deref(),
-        unarchive_selected.unwrap_or(false),
+        unarchive_selected.unwrap_or(true),
+        history_root.as_deref(),
     )
 }
 
@@ -905,6 +909,7 @@ mod tests {
                 allow_missing_session: true,
                 projectless_mode: Some("all"),
                 unarchive_selected: true,
+                history_root: Some(r"C:\Users\test\Documents\Codex"),
             },
         )
         .expect("bridge command");
@@ -912,6 +917,8 @@ mod tests {
         assert!(command.contains(&"--include-archived".to_string()));
         assert!(command.contains(&"--allow-missing-cwd".to_string()));
         assert!(command.contains(&"--allow-empty-cwd".to_string()));
+        assert!(command.contains(&"--history-root".to_string()));
+        assert!(command.contains(&r"C:\Users\test\Documents\Codex".to_string()));
         assert!(command.contains(&"--allow-missing-session".to_string()));
         assert!(command.contains(&"--projectless-mode".to_string()));
         assert!(command.contains(&"all".to_string()));

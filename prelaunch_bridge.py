@@ -16,7 +16,6 @@ from prelaunch_manager import (
     codex_running_processes,
     collect_prelaunch_evidence,
     configure_provider_for_launch,
-    enhancer_enabled,
     is_codex_or_cli_running,
     launch_codex_desktop,
     launch_codex_desktop_with_enhancer,
@@ -104,10 +103,10 @@ def handle_runtime_status() -> dict[str, object]:
             "appid": appid,
             "last_resort_exe": last_resort_exe,
             "method": (
-                "product_resolved_exe"
-                if product_resolved_exe
-                else "appid"
+                "appid"
                 if appid
+                else "product_resolved_exe"
+                if product_resolved_exe
                 else "windowsapps_exe_last_resort"
                 if last_resort_exe
                 else "none"
@@ -204,11 +203,12 @@ def run_history_repair(
     codex_home: str,
     projectless_mode: str,
     *,
-    include_archived: bool = False,
-    allow_missing_cwd: bool = False,
-    allow_empty_cwd: bool = False,
+    include_archived: bool = True,
+    allow_missing_cwd: bool = True,
+    allow_empty_cwd: bool = True,
     allow_missing_session: bool = False,
-    unarchive_selected: bool = False,
+    unarchive_selected: bool = True,
+    history_root: str | None = None,
 ) -> dict[str, object]:
     args = argparse.Namespace(
         codex_home=codex_home,
@@ -223,6 +223,8 @@ def run_history_repair(
     )
     codex_home_path = normalize_codex_home(codex_home)
     db_path = codex_home_path / "state_5.sqlite"
+    if not db_path.exists() and (codex_home_path / "sqlite" / "state_5.sqlite").exists():
+        db_path = codex_home_path / "sqlite" / "state_5.sqlite"
     state_path = codex_home_path / ".codex-global-state.json"
     index_path = codex_home_path / "session_index.jsonl"
 
@@ -245,7 +247,10 @@ def run_history_repair(
         )
     else:
         result["unarchived"] = 0
-    result.update(history_repair.repair_state(state_path, selected, args.current_thread_id, args.projectless_mode))
+    target_history_root = history_root or history_repair.default_history_root()
+    result["history_root"] = history_repair.safe_history_root(target_history_root)
+    result.update(history_repair.normalize_selected_workspaces(db_path, selected, target_history_root))
+    result.update(history_repair.repair_state(state_path, selected, args.current_thread_id, args.projectless_mode, target_history_root))
     return {"ok": True, "summary": result}
 
 
@@ -287,11 +292,11 @@ def handle_launch(
     projectless_mode: str,
     hide_official_quota_notice: bool = False,
     restore_history: bool = False,
-    include_archived: bool = False,
-    allow_missing_cwd: bool = False,
-    allow_empty_cwd: bool = False,
+    include_archived: bool = True,
+    allow_missing_cwd: bool = True,
+    allow_empty_cwd: bool = True,
     allow_missing_session: bool = False,
-    unarchive_selected: bool = False,
+    unarchive_selected: bool = True,
 ) -> dict[str, object]:
     report_dir = prepare_report_dir("配置并启动", mode)
     payload: dict[str, object] = {
@@ -399,7 +404,10 @@ def handle_launch(
             )
         )
 
-        launch = launch_codex_desktop()
+        if prelaunch_manager.enhancer_enabled(codex_home_path):
+            launch = launch_codex_desktop_with_enhancer(codex_home_path, mode)
+        else:
+            launch = launch_codex_desktop()
         payload["launch"] = launch
         payload["ok"] = bool(launch.get("ok"))
         if launch.get("ok"):
@@ -424,11 +432,12 @@ def handle_repair(
     codex_home: str,
     projectless_mode: str,
     *,
-    include_archived: bool = False,
-    allow_missing_cwd: bool = False,
-    allow_empty_cwd: bool = False,
+    include_archived: bool = True,
+    allow_missing_cwd: bool = True,
+    allow_empty_cwd: bool = True,
     allow_missing_session: bool = False,
-    unarchive_selected: bool = False,
+    unarchive_selected: bool = True,
+    history_root: str | None = None,
 ) -> dict[str, object]:
     report_dir = prepare_report_dir("修复恢复", "repair")
     payload: dict[str, object] = {
@@ -451,6 +460,7 @@ def handle_repair(
             allow_empty_cwd=allow_empty_cwd,
             allow_missing_session=allow_missing_session,
             unarchive_selected=unarchive_selected,
+            history_root=history_root,
         )
         payload["repair"] = repair
         payload["ok"] = bool(repair.get("ok"))
@@ -536,6 +546,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow-empty-cwd", action="store_true")
     parser.add_argument("--allow-missing-session", action="store_true")
     parser.add_argument("--unarchive-selected", action="store_true")
+    parser.add_argument("--history-root")
     return parser
 
 
@@ -570,6 +581,7 @@ def main() -> int:
                 allow_empty_cwd=args.allow_empty_cwd,
                 allow_missing_session=args.allow_missing_session,
                 unarchive_selected=args.unarchive_selected,
+                history_root=args.history_root,
             )
         elif args.command == "enhanced-launch":
             if not args.codex_home:
@@ -590,6 +602,7 @@ def main() -> int:
                 allow_empty_cwd=args.allow_empty_cwd,
                 allow_missing_session=args.allow_missing_session,
                 unarchive_selected=args.unarchive_selected,
+                history_root=args.history_root,
             )
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))

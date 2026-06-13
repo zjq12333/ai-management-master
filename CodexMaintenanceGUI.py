@@ -148,11 +148,12 @@ class CodexMaintenanceGUI:
         self.provider_bearer_token_var = StringVar(value="")
         self.provider_requires_auth = BooleanVar(value=False)
 
-        self.include_archived = BooleanVar(value=False)
-        self.allow_missing_cwd = BooleanVar(value=False)
-        self.allow_empty_cwd = BooleanVar(value=False)
+        self.history_root_var = StringVar(value=str(Path.home() / "Documents" / "Codex"))
+        self.include_archived = BooleanVar(value=True)
+        self.allow_missing_cwd = BooleanVar(value=True)
+        self.allow_empty_cwd = BooleanVar(value=True)
         self.allow_missing_session = BooleanVar(value=False)
-        self.unarchive_selected = BooleanVar(value=False)
+        self.unarchive_selected = BooleanVar(value=True)
         self.sync_provider = BooleanVar(value=False)
         self.install_threadripper = BooleanVar(value=False)
         self.advanced_visible = False
@@ -554,13 +555,13 @@ class CodexMaintenanceGUI:
         self.search_button.grid(row=0, column=0, sticky="w", ipadx=18, ipady=10, padx=(0, 8))
         self.preview_button = self.search_button
 
-        self.quick_repair_button = ttk.Button(repair_panel, text="恢复聊天记录", command=self.run_repair)
+        self.quick_repair_button = ttk.Button(repair_panel, text="安全恢复聊天", command=self.run_repair)
         self.quick_repair_button.grid(row=0, column=1, sticky="w", ipadx=18, ipady=10, padx=(0, 8))
 
-        self.advanced_button = ttk.Button(repair_panel, text="恢复选项", command=self.toggle_advanced)
+        self.advanced_button = ttk.Button(repair_panel, text="高级选项", command=self.toggle_advanced)
         self.advanced_button.grid(row=0, column=2, sticky="w", ipadx=12, ipady=10)
 
-        ttk.Label(repair_panel, text="先搜索确认数量，再关闭 Codex Desktop 后恢复。").grid(
+        ttk.Label(repair_panel, text="账号无关恢复：迁移到当前 provider，坏工作区归并到汇总目录，不重复建立空文件夹。").grid(
             row=1, column=0, columnspan=4, sticky="w", pady=(8, 0)
         )
 
@@ -592,17 +593,20 @@ class CodexMaintenanceGUI:
         for column in range(3):
             options.columnconfigure(column, weight=1)
 
-        self.add_option(options, 0, 0, "包含归档", self.include_archived, "会把已归档聊天也列入搜索/恢复结果。默认关闭。")
-        self.add_option(options, 0, 1, "允许已删除工作区", self.allow_missing_cwd, "会显示原工作目录已不存在的聊天，可能回到旧项目分组。")
-        self.add_option(options, 0, 2, "允许空工作区", self.allow_empty_cwd, "会显示目录存在但为空的聊天，可能出现空项目。")
-        self.add_option(options, 1, 0, "允许缺失 session", self.allow_missing_session, "会显示找不到会话文件的记录，可能无法打开完整内容。")
-        self.add_option(options, 1, 1, "取消所选归档标记", self.unarchive_selected, "正式恢复时会把选中的归档聊天改成未归档。")
-        self.add_option(options, 1, 2, "强制修复隐藏聊天识别", self.sync_provider, "默认会在检测到不匹配时自动尝试。勾选后会在恢复时强制执行一次。")
-        self.add_option(options, 2, 0, "允许安装 threadripper", self.install_threadripper, "会通过 npm 安装辅助工具，需要联网。")
+        ttk.Label(options, text="历史汇总目录").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        ttk.Entry(options, textvariable=self.history_root_var).grid(row=0, column=1, columnspan=2, sticky="ew", pady=(0, 6))
+
+        self.add_option(options, 1, 0, "包含归档", self.include_archived, "会把已归档聊天也列入搜索/恢复结果。默认开启。")
+        self.add_option(options, 1, 1, "纳入已删除工作区", self.allow_missing_cwd, "会恢复聊天，但不会重建旧目录；统一挂到历史汇总目录。")
+        self.add_option(options, 1, 2, "纳入空工作区", self.allow_empty_cwd, "会恢复聊天，但不会保留空项目；统一挂到历史汇总目录。")
+        self.add_option(options, 2, 0, "允许缺失 session", self.allow_missing_session, "会显示找不到会话文件的记录，可能无法打开完整内容。")
+        self.add_option(options, 2, 1, "取消所选归档标记", self.unarchive_selected, "正式恢复时会把选中的归档聊天改成未归档。")
+        self.add_option(options, 2, 2, "强制修复隐藏聊天识别", self.sync_provider, "默认会在检测到不匹配时自动尝试。勾选后会在恢复时强制执行一次。")
+        self.add_option(options, 3, 0, "允许安装 threadripper", self.install_threadripper, "会通过 npm 安装辅助工具，需要联网。")
 
         advanced_actions = ttk.Frame(options)
-        advanced_actions.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
-        self.repair_button = ttk.Button(advanced_actions, text="执行修复", command=self.run_repair)
+        advanced_actions.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        self.repair_button = ttk.Button(advanced_actions, text="执行安全恢复", command=self.run_repair)
         self.repair_button.grid(row=0, column=0)
 
         # Launch tab: compact summary of the last few log lines.
@@ -879,6 +883,8 @@ class CodexMaintenanceGUI:
             str(self.repair_script),
             "--codex-home",
             self.codex_home_var.get(),
+            "--history-root",
+            self.history_root_var.get(),
             "--projectless-mode",
             "none",
         ]

@@ -9,6 +9,7 @@ export interface PrelaunchRecoveryOptionsPayload {
   allowMissingSession: boolean;
   projectlessMode: PrelaunchProjectlessMode;
   unarchiveSelected: boolean;
+  historyRoot: string;
 }
 
 export interface PrelaunchProviderPayload {

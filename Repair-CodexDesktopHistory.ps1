@@ -1,8 +1,10 @@
 param(
     [string]$CodexHome = "$env:USERPROFILE\.codex",
     [string]$CurrentThreadId = $env:CODEX_THREAD_ID,
+    [string]$HistoryRoot = "$([Environment]::GetFolderPath('MyDocuments'))\Codex",
     [switch]$DryRun,
     [switch]$IncludeArchived,
+    [switch]$ExcludeArchived,
     [switch]$AllowMissingCwd,
     [switch]$AllowEmptyCwd,
     [switch]$AllowMissingSession,
@@ -12,6 +14,7 @@ param(
     [switch]$InstallThreadripper,
     [switch]$SkipThreadripperInstall,
     [switch]$NoRestart,
+    [switch]$LegacyCwdFiltering,
     [ValidateSet('current-only', 'all', 'none')]
     [string]$ProjectlessMode = 'none'
 )
@@ -69,6 +72,7 @@ $RepairArgs = @(
     '-X', 'utf8',
     $RepairPy,
     '--codex-home', $CodexHome,
+    '--history-root', $HistoryRoot,
     '--projectless-mode', $ProjectlessMode
 )
 
@@ -78,19 +82,19 @@ if ($CurrentThreadId) {
 if ($DryRun) {
     $RepairArgs += '--dry-run'
 }
-if ($IncludeArchived) {
+if ($IncludeArchived -or (-not $ExcludeArchived)) {
     $RepairArgs += '--include-archived'
 }
-if ($AllowMissingCwd) {
+if ($AllowMissingCwd -or (-not $LegacyCwdFiltering)) {
     $RepairArgs += '--allow-missing-cwd'
 }
-if ($AllowEmptyCwd) {
+if ($AllowEmptyCwd -or (-not $LegacyCwdFiltering)) {
     $RepairArgs += '--allow-empty-cwd'
 }
 if ($AllowMissingSession) {
     $RepairArgs += '--allow-missing-session'
 }
-if ($UnarchiveSelected) {
+if ($UnarchiveSelected -or (-not $ExcludeArchived)) {
     $RepairArgs += '--unarchive-selected'
 }
 

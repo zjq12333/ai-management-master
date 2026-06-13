@@ -4,6 +4,7 @@ import { CheckCircle2, KeyRound, Rocket, ServerCog } from "lucide-react";
 
 import { BentoCard } from "@/components/ui/bento-card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -38,6 +39,14 @@ function getDefaultCodexHome() {
 
 export const DEFAULT_CODEX_HOME = getDefaultCodexHome();
 
+function getDefaultHistoryRoot() {
+  const injectedHistoryRoot = import.meta.env.VITE_DEFAULT_HISTORY_ROOT?.trim();
+  if (injectedHistoryRoot) return injectedHistoryRoot;
+  return "%USERPROFILE%\\Documents\\Codex";
+}
+
+export const DEFAULT_HISTORY_ROOT = getDefaultHistoryRoot();
+
 const launchModes: LaunchCard[] = [
   { mode: "api", title: "本地模型桶启动", desc: "Codex 连接本地统一模型入口；provider、路由和 token 在模型管理中治理。" },
   { mode: "hybrid", title: "混合登录启动", desc: "保留官方登录态，同时使用本地模型桶；适合插件 + relay 双需求。" },
@@ -68,12 +77,13 @@ type LaunchCard = {
 type RepairMutationVars = PrelaunchRecoveryOptionsPayload | undefined;
 
 const defaultRecoveryOptions: PrelaunchRecoveryOptionsPayload = {
-  includeArchived: false,
-  allowMissingCwd: false,
-  allowEmptyCwd: false,
+  includeArchived: true,
+  allowMissingCwd: true,
+  allowEmptyCwd: true,
   allowMissingSession: false,
   projectlessMode: "none",
-  unarchiveSelected: false,
+  unarchiveSelected: true,
+  historyRoot: DEFAULT_HISTORY_ROOT,
 };
 
 export function LoginRepairPage() {
@@ -343,11 +353,13 @@ export function LoginRepairPage() {
       <BentoCard>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="text-sm font-semibold">历史恢复</div>
-            <p className="mt-1 text-sm leading-5 text-muted-foreground">聊天记录、workspace 或 session index 不正常时使用。</p>
+            <div className="text-sm font-semibold">安全历史恢复</div>
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">
+              跨账号/provider 恢复本机聊天记录；缺失或空 workspace 会归并到历史汇总目录，不会重复建立空文件夹。
+            </p>
           </div>
           <Button variant="outline" disabled={actionsDisabled} onClick={() => void repairWithRuntimeCheck()}>
-            {repairMutation.isPending ? "修复中..." : "修复历史"}
+            {repairMutation.isPending ? "恢复中..." : "安全恢复聊天"}
           </Button>
         </div>
       </BentoCard>
@@ -355,11 +367,13 @@ export function LoginRepairPage() {
       <BentoCard>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="text-sm font-semibold">高级恢复选项</div>
-            <p className="mt-1 text-sm leading-5 text-muted-foreground">只有需要放宽恢复范围、处理归档聊天时才打开。</p>
+            <div className="text-sm font-semibold">安全恢复选项</div>
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">
+              默认纳入归档、缺失 workspace 和空 workspace，但只恢复聊天记录，不恢复空目录。
+            </p>
           </div>
           <Button variant="outline" onClick={() => setAdvancedOpen((open) => !open)}>
-            {advancedOpen ? "收起高级恢复选项" : "显示高级恢复选项"}
+            {advancedOpen ? "收起安全恢复选项" : "显示安全恢复选项"}
           </Button>
         </div>
       </BentoCard>
@@ -368,10 +382,21 @@ export function LoginRepairPage() {
       <BentoCard>
         <div className="space-y-4">
           <div>
-            <div className="text-sm font-semibold">高级恢复</div>
+            <div className="text-sm font-semibold">安全恢复</div>
             <p className="mt-1 max-w-3xl text-sm leading-5 text-muted-foreground">
-              默认只恢复有明确 workspace 和 session 的聊天；这里用于放宽筛选、处理归档聊天或把选中聊天放回 projectless。
+              恢复范围默认放宽；坏 cwd 统一写入历史汇总目录，并同步 SQLite、session JSONL 和左侧栏状态。
             </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="history-root">历史汇总目录</Label>
+            <Input
+              id="history-root"
+              value={recoveryOptions.historyRoot}
+              disabled={actionsDisabled}
+              onChange={(event) =>
+                setRecoveryOptions((current) => ({ ...current, historyRoot: event.target.value }))
+              }
+            />
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <RecoverySwitch
@@ -389,7 +414,7 @@ export function LoginRepairPage() {
             />
             <RecoverySwitch
               id="recovery-allow-missing-cwd"
-              label="允许缺失 cwd"
+              label="纳入缺失 workspace"
               checked={recoveryOptions.allowMissingCwd}
               disabled={actionsDisabled}
               onCheckedChange={(checked) =>
@@ -398,7 +423,7 @@ export function LoginRepairPage() {
             />
             <RecoverySwitch
               id="recovery-allow-empty-cwd"
-              label="允许空 workspace"
+              label="纳入空 workspace"
               checked={recoveryOptions.allowEmptyCwd}
               disabled={actionsDisabled}
               onCheckedChange={(checked) =>

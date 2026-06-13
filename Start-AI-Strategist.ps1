@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $resolvedRoot = (Resolve-Path -LiteralPath $RepoRoot).ProviderPath
 $primaryExe = Join-Path $resolvedRoot "ai-strategist-desktop\src-tauri\target\release\AI-Strategist.exe"
 $debugExe = Join-Path $resolvedRoot "ai-strategist-desktop\src-tauri\target\debug\AI-Strategist.exe"
+$prelaunchBridgeScript = Join-Path $resolvedRoot "prelaunch_bridge.py"
 $pythonRuntime = Join-Path $resolvedRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $pythonRuntime)) {
     $pythonRuntime = "D:\Tools\Python312\python.exe"
@@ -150,6 +151,10 @@ foreach ($process in $existing) {
 
 if (Test-Path -LiteralPath $primaryExe) {
     Write-LaunchLog "Starting primary executable: $primaryExe"
+    if (Test-Path -LiteralPath $prelaunchBridgeScript) {
+        $env:AI_STRATEGIST_PRELAUNCH_BRIDGE = $prelaunchBridgeScript
+        Write-LaunchLog "Using source prelaunch bridge: $prelaunchBridgeScript"
+    }
     Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
     $started = Start-Process -FilePath $primaryExe -WorkingDirectory $resolvedRoot -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
     $started.Refresh()

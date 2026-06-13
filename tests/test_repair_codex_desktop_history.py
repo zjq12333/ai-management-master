@@ -107,6 +107,8 @@ class RepairCodexDesktopHistoryTests(unittest.TestCase):
             latest_workspace = root / "latest"
             old_workspace.mkdir()
             latest_workspace.mkdir()
+            (old_workspace / "file.txt").write_text("old", encoding="utf-8")
+            (latest_workspace / "file.txt").write_text("latest", encoding="utf-8")
             state_path = root / ".codex-global-state.json"
             state_path.write_text(
                 json.dumps(
@@ -132,6 +134,82 @@ class RepairCodexDesktopHistoryTests(unittest.TestCase):
             state = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertEqual(state["active-workspace-roots"], [str(latest_workspace)])
             self.assertEqual(result["active_workspace_roots"], [str(latest_workspace)])
+
+    def test_repair_state_collapses_missing_and_empty_cwds_to_history_root(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            history_root = root / "history-root"
+            history_root.mkdir()
+            (history_root / "keep.txt").write_text("history", encoding="utf-8")
+            empty_workspace = root / "empty-workspace"
+            empty_workspace.mkdir()
+            missing_workspace = root / "missing-workspace"
+            state_path = root / ".codex-global-state.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "active-workspace-roots": [],
+                        "electron-saved-workspace-roots": [str(empty_workspace), str(missing_workspace)],
+                        "project-order": [str(missing_workspace)],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = history_repair.repair_state(
+                state_path,
+                [
+                    {"id": "empty-thread", "cwd": str(empty_workspace), "updated_at": 2},
+                    {"id": "missing-thread", "cwd": str(missing_workspace), "updated_at": 1},
+                ],
+                current_thread_id=None,
+                projectless_mode="none",
+                history_root=str(history_root),
+            )
+
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["thread-workspace-root-hints"]["empty-thread"], str(history_root))
+            self.assertEqual(state["thread-workspace-root-hints"]["missing-thread"], str(history_root))
+            self.assertEqual(state["electron-saved-workspace-roots"], [str(history_root)])
+            self.assertEqual(state["project-order"], [str(history_root)])
+            self.assertEqual(state["active-workspace-roots"], [str(history_root)])
+            self.assertEqual(result["workspace_normalized_to_history_root"], 2)
+
+    def test_repair_state_dedupes_extended_length_windows_paths(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            (workspace / "file.txt").write_text("not empty", encoding="utf-8")
+            extended = "\\\\?\\" + str(workspace)
+            state_path = root / ".codex-global-state.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "active-workspace-roots": [],
+                        "electron-saved-workspace-roots": [str(workspace), extended],
+                        "project-order": [extended, str(workspace)],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            history_repair.repair_state(
+                state_path,
+                [
+                    {"id": "normal", "cwd": str(workspace), "updated_at": 2},
+                    {"id": "extended", "cwd": extended, "updated_at": 1},
+                ],
+                current_thread_id=None,
+                projectless_mode="none",
+                history_root=str(root),
+            )
+
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["electron-saved-workspace-roots"], [str(workspace)])
+            self.assertEqual(state["project-order"], [str(workspace)])
+            self.assertEqual(state["thread-workspace-root-hints"]["normal"], str(workspace))
+            self.assertEqual(state["thread-workspace-root-hints"]["extended"], str(workspace))
 
     def test_move_thread_workspace_can_skip_global_root_mutation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -229,6 +307,49 @@ class RepairCodexDesktopHistoryTests(unittest.TestCase):
                 ["thread-b", "thread-a"],
             )
             self.assertEqual(result["sort_keys"][0]["updated_at_ms"], 200000)
+
+    def test_normalize_selected_workspaces_updates_sqlite_and_rollout_cwd(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            history_root = root / "history"
+            history_root.mkdir()
+            (history_root / "file.txt").write_text("history", encoding="utf-8")
+            empty_workspace = root / "empty"
+            empty_workspace.mkdir()
+            db_path = root / "state_5.sqlite"
+            rollout_path = root / "rollout.jsonl"
+            thread_id = "thread-1"
+            with contextlib.closing(sqlite3.connect(db_path)) as con:
+                con.execute("create table threads (id text primary key, cwd text, rollout_path text not null)")
+                con.execute(
+                    "insert into threads (id, cwd, rollout_path) values (?, ?, ?)",
+                    (thread_id, str(empty_workspace), str(rollout_path)),
+                )
+                con.commit()
+
+            rollout_path.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {"id": thread_id, "cwd": str(empty_workspace)},
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            selected = [{"id": thread_id, "cwd": str(empty_workspace), "rollout_path": str(rollout_path)}]
+            result = history_repair.normalize_selected_workspaces(db_path, selected, str(history_root))
+
+            self.assertEqual(result["workspace_cwd_synced"], 1)
+            self.assertEqual(result["workspace_rollouts_synced"], 1)
+            self.assertEqual(selected[0]["cwd"], str(history_root))
+            with contextlib.closing(sqlite3.connect(db_path)) as con:
+                cwd = con.execute("select cwd from threads where id = ?", (thread_id,)).fetchone()[0]
+            self.assertEqual(cwd, str(history_root))
+            first_line = json.loads(rollout_path.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(first_line["payload"]["cwd"], str(history_root))
 
     def test_sync_selected_provider_updates_threads_and_rollout_session_meta(self):
         with tempfile.TemporaryDirectory() as temp_dir:
